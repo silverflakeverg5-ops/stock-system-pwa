@@ -24,6 +24,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Create public runtime config
+        env:
+          PUBLIC_SUPABASE_URL: ${{ vars.PUBLIC_SUPABASE_URL }}
+          PUBLIC_SUPABASE_KEY: ${{ vars.PUBLIC_SUPABASE_KEY }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          config = {
+              "supabaseUrl": os.environ.get("PUBLIC_SUPABASE_URL", ""),
+              "supabaseKey": os.environ.get("PUBLIC_SUPABASE_KEY", ""),
+          }
+          with open("public-config.json", "w", encoding="utf-8") as f:
+              json.dump(config, f, ensure_ascii=False, indent=2)
+          PY
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
