@@ -1,5 +1,68 @@
 const STORAGE_KEY = "stock-system-pwa-config";
-const PUBLIC_CONFIG_PATH = "public-config.json?v=6";
+const PUBLIC_CONFIG_PATH = "public-config.json?v=7";
+
+const ACTION_LABELS = {
+  BUY_CANDIDATE: "買い候補",
+  WATCH: "監視",
+  WAIT: "待機",
+  SKIP: "見送り",
+  ALL: "すべて",
+};
+
+const MARKET_LABELS = {
+  MARKET_VERY_STRONG: "かなり強い",
+  MARKET_STRONG: "強い",
+  MARKET_NEUTRAL: "中立",
+  MARKET_WEAK: "弱い",
+  MARKET_VERY_WEAK: "かなり弱い",
+  UNKNOWN: "不明",
+};
+
+const SIGNAL_LABELS = {
+  MA5_RECOVER: "5日線回復",
+  MA25_RECOVER: "25日線回復",
+  ABOVE_MA5: "5日線上",
+  ABOVE_MA25: "25日線上",
+  MA5_UPTREND: "5日線上向き",
+  MA25_UPTREND: "25日線上向き",
+  BREAK_PREV_HIGH: "前日高値突破",
+  BREAK_3D_HIGH: "3日高値突破",
+  BREAK_5D_HIGH: "5日高値突破",
+  BREAK_10D_HIGH: "10日高値突破",
+  BREAK_20D_HIGH: "20日高値突破",
+  LOWER_SHADOW_LONG: "長い下ヒゲ",
+  UPPER_SHADOW_LONG: "長い上ヒゲ",
+  BULLISH_CANDLE: "陽線",
+  BEARISH_CANDLE: "陰線",
+  BULLISH_ENGULFING: "包み陽線",
+  INSIDE_BAR: "はらみ足",
+  NARROW_RANGE: "小幅もみ合い",
+  RSI_RECOVER_30: "RSI30回復",
+  RSI_RECOVER_35: "RSI35回復",
+  RSI_RECOVER_40: "RSI40回復",
+  RSI_RECOVER_50: "RSI50回復",
+  RSI_OVERSOLD_LT30: "RSI売られすぎ",
+  RSI_STRONG_GE70: "RSI強い",
+  REBOUND_FROM_LOW: "安値から反発",
+  STRONG_REBOUND: "強い反発",
+  PRE5_UP: "5日上昇",
+  PRE20_UP: "20日上昇",
+  MOMENTUM_TURN: "勢い反転",
+  PRE5_DOWN_GT_5: "5日-5%以上",
+  PRE5_DOWN_GT_10: "5日-10%以上",
+  PRE20_DOWN_GT_10: "20日-10%以上",
+  PRE20_DOWN_GT_20: "20日-20%以上",
+  PRE20_DOWN_GT_30: "20日-30%以上",
+  DEEP_PULLBACK: "深押し",
+  VOL_DRY_5: "5日出来高枯れ",
+  VOL_DRY_20: "20日出来高枯れ",
+  VOL_EXPAND_5: "5日出来高増",
+  VOL_EXPAND_20: "20日出来高増",
+  VOL_CLIMAX_20: "出来高急増",
+  BB_LOW: "BB下限付近",
+  BB_MID_RECOVER: "BB中央回復",
+  BB_HIGH: "BB上限付近",
+};
 
 const state = {
   config: null,
@@ -133,6 +196,26 @@ function stars(score) {
   return "★".repeat(count) + "☆".repeat(5 - count);
 }
 
+function actionLabel(action) {
+  return ACTION_LABELS[action] || action || "-";
+}
+
+function marketLabel(market) {
+  return MARKET_LABELS[market] || market || "-";
+}
+
+function signalLabel(signal) {
+  return SIGNAL_LABELS[signal] || signal || "-";
+}
+
+function signalChainLabel(chain) {
+  if (!chain) return "-";
+  return String(chain)
+    .split(" -> ")
+    .map((part) => signalLabel(part.trim()))
+    .join(" → ");
+}
+
 function expectedPrice(row) {
   const price = Number(row.close_price);
   const upside = Number(row.expected_upside_pct);
@@ -181,7 +264,9 @@ function renderSummary() {
   const market = state.market[0] || {};
   const buy = state.candidates.filter((r) => r.suggested_action === "BUY_CANDIDATE").length;
   const watch = state.candidates.filter((r) => r.suggested_action === "WATCH").length;
-  els.marketRegime.textContent = market.market_regime_5 || Object.keys(state.run?.report?.market_counts || {})[0] || "-";
+  const rawMarket = market.market_regime_5 || Object.keys(state.run?.report?.market_counts || {})[0] || "-";
+  els.marketRegime.textContent = marketLabel(rawMarket);
+  els.marketRegime.title = rawMarket;
   els.buyCount.textContent = String(buy);
   els.watchCount.textContent = String(watch);
   els.runDate.textContent = state.run?.run_date || "-";
@@ -210,7 +295,7 @@ function renderCandidates() {
           <div class="card-title">
             <span class="code">${row.code}</span>
             <span class="name">${row.name || ""}</span>
-            <span class="badge ${actionClass(row.suggested_action)}">${row.suggested_action}</span>
+            <span class="badge ${actionClass(row.suggested_action)}">${actionLabel(row.suggested_action)}</span>
           </div>
           <div class="card-numbers">
             <span>score ${number(score)}</span>
@@ -301,7 +386,7 @@ function renderDetail() {
     <div class="card-title">
       <span class="code">${row.code}</span>
       <span class="name">${row.name || ""}</span>
-      <span class="badge ${actionClass(row.suggested_action)}">${row.suggested_action}</span>
+      <span class="badge ${actionClass(row.suggested_action)}">${actionLabel(row.suggested_action)}</span>
     </div>
     <div class="detail-grid">
       <div class="detail-item"><span>総合判断</span><strong>${stars(row.switch_priority_score)}</strong></div>
@@ -313,7 +398,7 @@ function renderDetail() {
       <div class="detail-item"><span>期待日数</span><strong>${number(row.expected_days_to_max_gain)}日</strong></div>
       <div class="detail-item"><span>下落リスク</span><strong>${number(row.expected_downside_pct)}%</strong></div>
     </div>
-    <div class="signal-box"><strong>シグナル</strong><br>${row.signal_chain || row.signal_name || "-"}</div>
+    <div class="signal-box"><strong>シグナル</strong><br>${signalChainLabel(row.signal_chain || row.signal_name)}</div>
     <div class="signal-box"><strong>理由</strong><br>${row.reason || "-"}</div>
   `;
   loadChartForSelected().then(drawChart).catch((error) => {
