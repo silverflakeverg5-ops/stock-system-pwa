@@ -29,12 +29,29 @@ const els = {
   chartMeta: document.querySelector("#chartMeta"),
 };
 
+async function clearOldServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch {}
+}
+
 function normalizeSupabaseUrl(input) {
-  return String(input || "")
-    .trim()
-    .replace(/\/+$/, "")
-    .replace(/\/rest\/v1$/i, "")
-    .replace(/\/+$/, "");
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return raw
+      .replace(/\/+$/, "")
+      .replace(/\/rest\/v1$/i, "")
+      .replace(/\/+$/, "");
+  }
 }
 
 function loadConfig() {
@@ -120,7 +137,7 @@ async function loadData() {
   }
 
   showSetup(false);
-  els.runStatus.textContent = "読み込み中...";
+  els.runStatus.textContent = `読み込み中... ${normalizeSupabaseUrl(state.config.url)}`;
   const runs = await fetchTable("stock_operation_runs", {
     select: "*",
     order: "created_at.desc",
@@ -308,6 +325,8 @@ els.saveConfigButton.addEventListener("click", () => {
 els.clearConfigButton.addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
   state.config = null;
+  els.supabaseUrlInput.value = "";
+  els.supabaseKeyInput.value = "";
   showSetup(true);
 });
 
@@ -322,11 +341,9 @@ els.actionFilter.addEventListener("change", () => {
   render();
 });
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
-}
-
-showSetup(!state.config);
-loadData().catch((error) => {
-  els.runStatus.textContent = error.message;
+clearOldServiceWorker().finally(() => {
+  showSetup(!state.config);
+  loadData().catch((error) => {
+    els.runStatus.textContent = error.message;
+  });
 });
