@@ -29,17 +29,28 @@ const els = {
   chartMeta: document.querySelector("#chartMeta"),
 };
 
+function normalizeSupabaseUrl(input) {
+  return String(input || "")
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/rest\/v1$/i, "")
+    .replace(/\/+$/, "");
+}
+
 function loadConfig() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    const config = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (config?.url) config.url = normalizeSupabaseUrl(config.url);
+    return config;
   } catch {
     return null;
   }
 }
 
 function saveConfig(config) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
-  state.config = config;
+  const normalized = { ...config, url: normalizeSupabaseUrl(config.url) };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  state.config = normalized;
 }
 
 function showSetup(show) {
@@ -58,7 +69,8 @@ function supabaseHeaders() {
 }
 
 async function fetchTable(table, params = {}) {
-  const url = new URL(`${state.config.url.replace(/\/$/, "")}/rest/v1/${table}`);
+  const baseUrl = normalizeSupabaseUrl(state.config.url);
+  const url = new URL(`${baseUrl}/rest/v1/${table}`);
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
@@ -282,10 +294,11 @@ function render() {
 }
 
 els.saveConfigButton.addEventListener("click", () => {
-  const url = els.supabaseUrlInput.value.trim();
+  const url = normalizeSupabaseUrl(els.supabaseUrlInput.value);
   const key = els.supabaseKeyInput.value.trim();
   if (!url || !key) return;
   saveConfig({ url, key });
+  els.supabaseUrlInput.value = url;
   loadData().catch((error) => {
     showSetup(true);
     els.runStatus.textContent = error.message;
