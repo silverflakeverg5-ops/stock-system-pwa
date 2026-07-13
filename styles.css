@@ -86,9 +86,16 @@ button, select {
   gap: 12px;
   margin-bottom: 16px;
 }
-.metric-card { padding: 14px; }
+.metric-card { min-width: 0; padding: 14px; }
 .metric-card span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
-.metric-card strong { font-size: 22px; }
+.metric-card strong {
+  display: block;
+  min-width: 0;
+  font-size: clamp(17px, 4.8vw, 22px);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  letter-spacing: 0;
+}
 
 .section-head {
   display: flex;
@@ -155,6 +162,7 @@ button, select {
   background: #f8fafc;
   border: 1px solid var(--line);
   line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 .empty-state { color: var(--muted); padding: 18px 0; }
 canvas { width: 100%; margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
@@ -162,8 +170,19 @@ canvas { width: 100%; margin-top: 10px; border: 1px solid var(--line); border-ra
 
 @media (max-width: 760px) {
   .app-header { align-items: flex-start; }
-  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  main { padding: 14px; }
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .metric-card { padding: 12px; }
   .detail-layout { grid-template-columns: 1fr; }
   .candidate-card { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 380px) {
+  h1 { font-size: 21px; }
+  .summary-grid { gap: 8px; }
+  .metric-card { padding: 10px; }
+  .metric-card strong { font-size: 16px; }
+  .section-head { align-items: flex-start; flex-direction: column; }
+  .section-head select { width: 100%; }
 }
