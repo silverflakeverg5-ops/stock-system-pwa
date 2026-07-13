@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101820" />
     <title>Stock System Ops</title>
-    <link rel="manifest" href="manifest.webmanifest?v=4" />
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <link rel="manifest" href="manifest.webmanifest?v=6" />
+    <link rel="stylesheet" href="styles.css?v=6" />
   </head>
   <body>
     <header class="app-header">
@@ -20,7 +20,7 @@
     <main>
       <section id="setupPanel" class="panel setup-panel hidden">
         <h2>Supabase接続</h2>
-        <p>公開用のURLと publishable key を入力してください。service_role key は入れないでください。</p>
+        <p>通常は自動接続します。表示されない場合だけ、公開用のURLと publishable key を入力してください。service_role key は入れないでください。</p>
         <label>
           Supabase URL
           <input id="supabaseUrlInput" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
@@ -82,6 +82,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=4" type="module"></script>
+    <script src="app.js?v=6" type="module"></script>
   </body>
 </html>
