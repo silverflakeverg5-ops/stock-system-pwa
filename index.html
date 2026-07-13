@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101820" />
+    <title>Stock System Ops</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Daily Stock System</p>
+        <h1>運用ダッシュボード</h1>
+      </div>
+      <button id="refreshButton" class="icon-button" type="button" aria-label="更新">更新</button>
+    </header>
+
+    <main>
+      <section id="setupPanel" class="panel setup-panel hidden">
+        <h2>Supabase接続</h2>
+        <p>公開用のURLと publishable key を入力してください。service_role key は入れないでください。</p>
+        <label>
+          Supabase URL
+          <input id="supabaseUrlInput" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+        </label>
+        <label>
+          Publishable key
+          <input id="supabaseKeyInput" type="password" placeholder="sb_publishable_..." autocomplete="off" />
+        </label>
+        <div class="button-row">
+          <button id="saveConfigButton" class="primary-button" type="button">保存して読み込む</button>
+          <button id="clearConfigButton" class="ghost-button" type="button">設定を消す</button>
+        </div>
+      </section>
+
+      <section class="summary-grid">
+        <article class="metric-card">
+          <span>地合い</span>
+          <strong id="marketRegime">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>BUY候補</span>
+          <strong id="buyCount">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>WATCH</span>
+          <strong id="watchCount">-</strong>
+        </article>
+        <article class="metric-card">
+          <span>更新日</span>
+          <strong id="runDate">-</strong>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2>今日の候補</h2>
+            <p id="runStatus">読み込み待ち</p>
+          </div>
+          <select id="actionFilter" aria-label="候補種別">
+            <option value="BUY_CANDIDATE">BUY</option>
+            <option value="WATCH">WATCH</option>
+            <option value="ALL">ALL</option>
+          </select>
+        </div>
+        <div id="candidateList" class="candidate-list"></div>
+      </section>
+
+      <section class="detail-layout">
+        <article class="panel detail-panel">
+          <h2>詳細</h2>
+          <div id="candidateDetail" class="empty-state">候補を選択してください。</div>
+        </article>
+        <article class="panel chart-panel">
+          <h2>チャート</h2>
+          <canvas id="priceChart" height="220"></canvas>
+          <div id="chartMeta" class="chart-meta">チャートデータ待ち</div>
+        </article>
+      </section>
+    </main>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
