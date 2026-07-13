@@ -1,6 +1,8 @@
 const STORAGE_KEY = "stock-system-pwa-config";
+const PUBLIC_CONFIG_PATH = "public-config.json?v=6";
+
 const state = {
-  config: loadConfig(),
+  config: null,
   run: null,
   candidates: [],
   judgements: [],
@@ -57,15 +59,30 @@ function normalizeSupabaseUrl(input) {
 function loadConfig() {
   try {
     const config = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-    if (config?.url) config.url = normalizeSupabaseUrl(config.url);
-    return config;
+    if (!config) return null;
+    if (config.url) config.url = normalizeSupabaseUrl(config.url);
+    return { ...config, source: "manual" };
+  } catch {
+    return null;
+  }
+}
+
+async function loadPublicConfig() {
+  try {
+    const res = await fetch(PUBLIC_CONFIG_PATH, { cache: "no-store" });
+    if (!res.ok) return null;
+    const config = await res.json();
+    const url = normalizeSupabaseUrl(config.supabaseUrl || config.url);
+    const key = String(config.supabaseKey || config.key || "").trim();
+    if (!url || !key) return null;
+    return { url, key, source: "public" };
   } catch {
     return null;
   }
 }
 
 function saveConfig(config) {
-  const normalized = { ...config, url: normalizeSupabaseUrl(config.url) };
+  const normalized = { ...config, url: normalizeSupabaseUrl(config.url), source: "manual" };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   state.config = normalized;
 }
@@ -144,7 +161,7 @@ async function loadData() {
     limit: "1",
   });
   state.run = runs[0] || null;
-  if (!state.run) throw new Error("stock_operation_runs にデータがありません。")
+  if (!state.run) throw new Error("stock_operation_runs にデータがありません。");
 
   const runId = state.run.run_id;
   const [candidates, judgements, market] = await Promise.all([
@@ -341,9 +358,15 @@ els.actionFilter.addEventListener("change", () => {
   render();
 });
 
-clearOldServiceWorker().finally(() => {
+async function initialize() {
+  await clearOldServiceWorker();
+  state.config = await loadPublicConfig();
+  if (!state.config) state.config = loadConfig();
   showSetup(!state.config);
   loadData().catch((error) => {
+    if (!state.config?.source || state.config.source !== "public") showSetup(true);
     els.runStatus.textContent = error.message;
   });
-});
+}
+
+initialize();
