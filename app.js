@@ -1,5 +1,5 @@
 const STORAGE_KEY = "stock-system-pwa-config";
-const APP_VERSION = "8";
+const APP_VERSION = "9";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 
 const ACTION_LABELS = {
@@ -113,10 +113,7 @@ function normalizeSupabaseUrl(input) {
   try {
     return new URL(raw).origin;
   } catch {
-    return raw
-      .replace(/\/+$/, "")
-      .replace(/\/rest\/v1$/i, "")
-      .replace(/\/+$/, "");
+    return raw.replace(/\/+$/, "").replace(/\/rest\/v1$/i, "").replace(/\/+$/, "");
   }
 }
 
@@ -174,13 +171,9 @@ async function fetchTable(table, params = {}) {
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
-  const res = await fetch(url, {
-    headers: supabaseHeaders(),
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    throw new Error(`${table}: ${res.status} ${await res.text()}`);
-  }
+  url.searchParams.set("_ts", String(Date.now()));
+  const res = await fetch(url, { headers: supabaseHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`${table}: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -216,10 +209,7 @@ function signalLabel(signal) {
 
 function signalChainLabel(chain) {
   if (!chain) return "-";
-  return String(chain)
-    .split(" -> ")
-    .map((part) => signalLabel(part.trim()))
-    .join(" → ");
+  return String(chain).split(" -> ").map((part) => signalLabel(part.trim())).join(" → ");
 }
 
 function expectedPrice(row) {
@@ -235,19 +225,15 @@ function actionClass(action) {
   return "skip";
 }
 
-async function pickLatestRunWithCandidates(runs) {
-  for (const run of runs) {
-    const candidates = await fetchTable("stock_daily_candidates", {
-      select: "*",
-      run_id: `eq.${run.run_id}`,
-      order: "rank.asc,switch_priority_score.desc",
-      limit: "500",
-    });
-    if (candidates.length > 0) {
-      return { run, candidates };
-    }
-  }
-  return { run: runs[0] || null, candidates: [] };
+async function loadLatestCandidateRows() {
+  const rows = await fetchTable("stock_daily_candidates", {
+    select: "*",
+    order: "run_date.desc,rank.asc,switch_priority_score.desc",
+    limit: "2000",
+  });
+  if (!rows.length) return { runId: null, candidates: [] };
+  const runId = rows[0].run_id;
+  return { runId, candidates: rows.filter((row) => row.run_id === runId) };
 }
 
 async function loadData() {
@@ -259,25 +245,22 @@ async function loadData() {
 
   showSetup(false);
   els.runStatus.textContent = `読み込み中... ${normalizeSupabaseUrl(state.config.url)}`;
-  const runs = await fetchTable("stock_operation_runs", {
-    select: "*",
-    status: "eq.completed",
-    order: "run_date.desc,created_at.desc",
-    limit: "10",
-  });
-  if (!runs.length) throw new Error("stock_operation_runs にデータがありません。");
 
-  const picked = await pickLatestRunWithCandidates(runs);
-  state.run = picked.run;
-  state.candidates = picked.candidates;
-  if (!state.run) throw new Error("表示できるrunがありません。");
+  const latest = await loadLatestCandidateRows();
+  if (!latest.runId) throw new Error("stock_daily_candidates に表示できる候補がありません。");
 
-  const runId = state.run.run_id;
-  const [judgements, market] = await Promise.all([
-    fetchTable("stock_position_judgements", { select: "*", run_id: `eq.${runId}` }),
-    fetchTable("stock_daily_market_summary", { select: "*", run_id: `eq.${runId}`, order: "date.desc", limit: "30" }),
+  const [runs, judgements, market] = await Promise.all([
+    fetchTable("stock_operation_runs", { select: "*", run_id: `eq.${latest.runId}`, limit: "1" }),
+    fetchTable("stock_position_judgements", { select: "*", run_id: `eq.${latest.runId}` }),
+    fetchTable("stock_daily_market_summary", { select: "*", run_id: `eq.${latest.runId}`, order: "date.desc", limit: "30" }),
   ]);
 
+  state.run = runs[0] || {
+    run_id: latest.runId,
+    run_date: latest.candidates[0]?.run_date || "-",
+    report: {},
+  };
+  state.candidates = latest.candidates;
   state.judgements = judgements;
   state.market = market;
   state.selectedCode = state.candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || state.candidates[0]?.code || null;
@@ -288,12 +271,12 @@ function renderSummary() {
   const market = state.market[0] || {};
   const buy = state.candidates.filter((r) => r.suggested_action === "BUY_CANDIDATE").length;
   const watch = state.candidates.filter((r) => r.suggested_action === "WATCH").length;
-  const rawMarket = market.market_regime_5 || Object.keys(state.run?.report?.market_counts || {})[0] || "-";
+  const rawMarket = market.market_regime_5 || state.candidates[0]?.market_regime_5 || Object.keys(state.run?.report?.market_counts || {})[0] || "-";
   els.marketRegime.textContent = marketLabel(rawMarket);
   els.marketRegime.title = rawMarket;
   els.buyCount.textContent = String(buy);
   els.watchCount.textContent = String(watch);
-  els.runDate.textContent = state.run?.run_date || "-";
+  els.runDate.textContent = state.run?.run_date || state.candidates[0]?.run_date || "-";
   els.runStatus.textContent = `run_id: ${state.run?.run_id || "-"} / 表示候補 ${state.candidates.length}件`;
 }
 
@@ -394,7 +377,7 @@ function drawChart(rows) {
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
-  els.chartMeta.textContent = `${rows[0].date} - ${rows[rows.length - 1].date} / close ${yen(values.at(-1))}`;
+  els.chartMeta.textContent = `${rows[0].date} - ${rows[rows.length - 1].date} / close ${yen(values[values.length - 1])}`;
 }
 
 function renderDetail() {
