@@ -1,5 +1,5 @@
 const STORAGE_KEY = "stock-system-pwa-config";
-const APP_VERSION = "9";
+const APP_VERSION = "10";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 
 const ACTION_LABELS = {
@@ -171,7 +171,6 @@ async function fetchTable(table, params = {}) {
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
-  url.searchParams.set("_ts", String(Date.now()));
   const res = await fetch(url, { headers: supabaseHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`${table}: ${res.status} ${await res.text()}`);
   return res.json();
