@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101820" />
     <title>Stock System Ops</title>
-    <link rel="manifest" href="manifest.webmanifest?v=6" />
-    <link rel="stylesheet" href="styles.css?v=6" />
+    <link rel="manifest" href="manifest.webmanifest?v=7" />
+    <link rel="stylesheet" href="styles.css?v=7" />
   </head>
   <body>
     <header class="app-header">
@@ -41,11 +41,11 @@
           <strong id="marketRegime">-</strong>
         </article>
         <article class="metric-card">
-          <span>BUY候補</span>
+          <span>買い候補</span>
           <strong id="buyCount">-</strong>
         </article>
         <article class="metric-card">
-          <span>WATCH</span>
+          <span>監視</span>
           <strong id="watchCount">-</strong>
         </article>
         <article class="metric-card">
@@ -61,9 +61,9 @@
             <p id="runStatus">読み込み待ち</p>
           </div>
           <select id="actionFilter" aria-label="候補種別">
-            <option value="BUY_CANDIDATE">BUY</option>
-            <option value="WATCH">WATCH</option>
-            <option value="ALL">ALL</option>
+            <option value="BUY_CANDIDATE">買い候補</option>
+            <option value="WATCH">監視</option>
+            <option value="ALL">すべて</option>
           </select>
         </div>
         <div id="candidateList" class="candidate-list"></div>
@@ -82,6 +82,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=6" type="module"></script>
+    <script src="app.js?v=7" type="module"></script>
   </body>
 </html>
