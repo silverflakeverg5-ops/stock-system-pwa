@@ -1,0 +1,9 @@
+{
+  "name": "Stock System Ops",
+  "short_name": "Stock Ops",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f6f8",
+  "theme_color": "#101820",
+  "description": "Daily stock candidates, judgement, signals and chart dashboard."
+}
