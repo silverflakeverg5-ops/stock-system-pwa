@@ -1,5 +1,6 @@
 const STORAGE_KEY = "stock-system-pwa-config";
-const PUBLIC_CONFIG_PATH = "public-config.json?v=7";
+const APP_VERSION = "8";
+const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 
 const ACTION_LABELS = {
   BUY_CANDIDATE: "買い候補",
@@ -162,6 +163,8 @@ function supabaseHeaders() {
   return {
     apikey: state.config.key,
     Authorization: `Bearer ${state.config.key}`,
+    "Cache-Control": "no-store",
+    Pragma: "no-cache",
   };
 }
 
@@ -171,7 +174,10 @@ async function fetchTable(table, params = {}) {
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
-  const res = await fetch(url, { headers: supabaseHeaders() });
+  const res = await fetch(url, {
+    headers: supabaseHeaders(),
+    cache: "no-store",
+  });
   if (!res.ok) {
     throw new Error(`${table}: ${res.status} ${await res.text()}`);
   }
@@ -229,6 +235,21 @@ function actionClass(action) {
   return "skip";
 }
 
+async function pickLatestRunWithCandidates(runs) {
+  for (const run of runs) {
+    const candidates = await fetchTable("stock_daily_candidates", {
+      select: "*",
+      run_id: `eq.${run.run_id}`,
+      order: "rank.asc,switch_priority_score.desc",
+      limit: "500",
+    });
+    if (candidates.length > 0) {
+      return { run, candidates };
+    }
+  }
+  return { run: runs[0] || null, candidates: [] };
+}
+
 async function loadData() {
   if (!state.config?.url || !state.config?.key) {
     showSetup(true);
@@ -240,23 +261,26 @@ async function loadData() {
   els.runStatus.textContent = `読み込み中... ${normalizeSupabaseUrl(state.config.url)}`;
   const runs = await fetchTable("stock_operation_runs", {
     select: "*",
-    order: "created_at.desc",
-    limit: "1",
+    status: "eq.completed",
+    order: "run_date.desc,created_at.desc",
+    limit: "10",
   });
-  state.run = runs[0] || null;
-  if (!state.run) throw new Error("stock_operation_runs にデータがありません。");
+  if (!runs.length) throw new Error("stock_operation_runs にデータがありません。");
+
+  const picked = await pickLatestRunWithCandidates(runs);
+  state.run = picked.run;
+  state.candidates = picked.candidates;
+  if (!state.run) throw new Error("表示できるrunがありません。");
 
   const runId = state.run.run_id;
-  const [candidates, judgements, market] = await Promise.all([
-    fetchTable("stock_daily_candidates", { select: "*", run_id: `eq.${runId}`, order: "rank.asc,switch_priority_score.desc" }),
+  const [judgements, market] = await Promise.all([
     fetchTable("stock_position_judgements", { select: "*", run_id: `eq.${runId}` }),
     fetchTable("stock_daily_market_summary", { select: "*", run_id: `eq.${runId}`, order: "date.desc", limit: "30" }),
   ]);
 
-  state.candidates = candidates;
   state.judgements = judgements;
   state.market = market;
-  state.selectedCode = candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || candidates[0]?.code || null;
+  state.selectedCode = state.candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || state.candidates[0]?.code || null;
   render();
 }
 
@@ -270,7 +294,7 @@ function renderSummary() {
   els.buyCount.textContent = String(buy);
   els.watchCount.textContent = String(watch);
   els.runDate.textContent = state.run?.run_date || "-";
-  els.runStatus.textContent = `run_id: ${state.run?.run_id || "-"}`;
+  els.runStatus.textContent = `run_id: ${state.run?.run_id || "-"} / 表示候補 ${state.candidates.length}件`;
 }
 
 function filteredCandidates() {
