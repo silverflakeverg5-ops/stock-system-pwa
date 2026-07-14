@@ -1,5 +1,5 @@
 const STORAGE_KEY = "stock-system-pwa-config";
-const APP_VERSION = "10";
+const APP_VERSION = "11";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 
 const ACTION_LABELS = {
@@ -69,9 +69,7 @@ const state = {
   config: null,
   run: null,
   candidates: [],
-  judgements: [],
   market: [],
-  charts: [],
   selectedCode: null,
   actionFilter: "BUY_CANDIDATE",
 };
@@ -117,12 +115,11 @@ function normalizeSupabaseUrl(input) {
   }
 }
 
-function loadConfig() {
+function loadManualConfig() {
   try {
     const config = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
     if (!config) return null;
-    if (config.url) config.url = normalizeSupabaseUrl(config.url);
-    return { ...config, source: "manual" };
+    return { ...config, url: normalizeSupabaseUrl(config.url), source: "manual" };
   } catch {
     return null;
   }
@@ -168,25 +165,21 @@ function supabaseHeaders() {
 async function fetchTable(table, params = {}) {
   const baseUrl = normalizeSupabaseUrl(state.config.url);
   const url = new URL(`${baseUrl}/rest/v1/${table}`);
-  for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
-  }
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   const res = await fetch(url, { headers: supabaseHeaders(), cache: "no-store" });
   if (!res.ok) throw new Error(`${table}: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
-function number(value, digits = 1) {
+const number = (value, digits = 1) => {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "-";
-  return n.toFixed(digits);
-}
+  return Number.isFinite(n) ? n.toFixed(digits) : "-";
+};
 
-function yen(value) {
+const yen = (value) => {
   const n = Number(value);
-  if (!Number.isFinite(n)) return "-";
-  return Math.round(n).toLocaleString("ja-JP");
-}
+  return Number.isFinite(n) ? Math.round(n).toLocaleString("ja-JP") : "-";
+};
 
 function stars(score) {
   const n = Number(score);
@@ -194,28 +187,15 @@ function stars(score) {
   return "★".repeat(count) + "☆".repeat(5 - count);
 }
 
-function actionLabel(action) {
-  return ACTION_LABELS[action] || action || "-";
-}
-
-function marketLabel(market) {
-  return MARKET_LABELS[market] || market || "-";
-}
-
-function signalLabel(signal) {
-  return SIGNAL_LABELS[signal] || signal || "-";
-}
-
-function signalChainLabel(chain) {
-  if (!chain) return "-";
-  return String(chain).split(" -> ").map((part) => signalLabel(part.trim())).join(" → ");
-}
+const actionLabel = (action) => ACTION_LABELS[action] || action || "-";
+const marketLabel = (market) => MARKET_LABELS[market] || market || "-";
+const signalLabel = (signal) => SIGNAL_LABELS[signal] || String(signal || "-").replaceAll("_", " ");
+const signalChainLabel = (chain) => chain ? String(chain).split(" -> ").map((part) => signalLabel(part.trim())).join(" → ") : "-";
 
 function expectedPrice(row) {
   const price = Number(row.close_price);
   const upside = Number(row.expected_upside_pct);
-  if (!Number.isFinite(price) || !Number.isFinite(upside)) return null;
-  return price * (1 + upside / 100);
+  return Number.isFinite(price) && Number.isFinite(upside) ? price * (1 + upside / 100) : null;
 }
 
 function actionClass(action) {
@@ -224,15 +204,33 @@ function actionClass(action) {
   return "skip";
 }
 
-async function loadLatestCandidateRows() {
-  const rows = await fetchTable("stock_daily_candidates", {
+async function getNewestRunWithCandidates() {
+  const runs = await fetchTable("stock_operation_runs", {
     select: "*",
-    order: "run_date.desc,rank.asc,switch_priority_score.desc",
+    order: "created_at.desc",
+    limit: "20",
+  });
+  for (const run of runs) {
+    const candidates = await fetchTable("stock_daily_candidates", {
+      select: "*",
+      run_id: `eq.${run.run_id}`,
+      order: "rank.asc,switch_priority_score.desc",
+      limit: "2000",
+    });
+    if (candidates.length > 0) return { run, candidates };
+  }
+
+  const fallback = await fetchTable("stock_daily_candidates", {
+    select: "*",
+    order: "created_at.desc",
     limit: "2000",
   });
-  if (!rows.length) return { runId: null, candidates: [] };
-  const runId = rows[0].run_id;
-  return { runId, candidates: rows.filter((row) => row.run_id === runId) };
+  if (!fallback.length) return { run: null, candidates: [] };
+  const runId = fallback[0].run_id;
+  return {
+    run: { run_id: runId, run_date: fallback[0].run_date, report: {} },
+    candidates: fallback.filter((row) => row.run_id === runId).sort((a, b) => Number(a.rank || 9999) - Number(b.rank || 9999)),
+  };
 }
 
 async function loadData() {
@@ -245,22 +243,18 @@ async function loadData() {
   showSetup(false);
   els.runStatus.textContent = `読み込み中... ${normalizeSupabaseUrl(state.config.url)}`;
 
-  const latest = await loadLatestCandidateRows();
-  if (!latest.runId) throw new Error("stock_daily_candidates に表示できる候補がありません。");
+  const picked = await getNewestRunWithCandidates();
+  if (!picked.run || !picked.candidates.length) throw new Error("表示できる候補がありません。");
 
-  const [runs, judgements, market] = await Promise.all([
-    fetchTable("stock_operation_runs", { select: "*", run_id: `eq.${latest.runId}`, limit: "1" }),
-    fetchTable("stock_position_judgements", { select: "*", run_id: `eq.${latest.runId}` }),
-    fetchTable("stock_daily_market_summary", { select: "*", run_id: `eq.${latest.runId}`, order: "date.desc", limit: "30" }),
-  ]);
+  const market = await fetchTable("stock_daily_market_summary", {
+    select: "*",
+    run_id: `eq.${picked.run.run_id}`,
+    order: "date.desc",
+    limit: "30",
+  });
 
-  state.run = runs[0] || {
-    run_id: latest.runId,
-    run_date: latest.candidates[0]?.run_date || "-",
-    report: {},
-  };
-  state.candidates = latest.candidates;
-  state.judgements = judgements;
+  state.run = picked.run;
+  state.candidates = picked.candidates;
   state.market = market;
   state.selectedCode = state.candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || state.candidates[0]?.code || null;
   render();
@@ -324,14 +318,12 @@ function renderCandidates() {
 
 async function loadChartForSelected() {
   if (!state.selectedCode || !state.run) return [];
-  const rows = await fetchTable("stock_candidate_charts", {
+  return fetchTable("stock_candidate_charts", {
     select: "date,code,close,high,low,return_pct,market_relative_return_pct,low_price_relative_return_pct",
     run_id: `eq.${state.run.run_id}`,
     code: `eq.${state.selectedCode}`,
     order: "date.asc",
   });
-  state.charts = rows;
-  return rows;
 }
 
 function drawChart(rows) {
@@ -452,7 +444,7 @@ els.actionFilter.addEventListener("change", () => {
 async function initialize() {
   await clearOldServiceWorker();
   state.config = await loadPublicConfig();
-  if (!state.config) state.config = loadConfig();
+  if (!state.config) state.config = loadManualConfig();
   showSetup(!state.config);
   loadData().catch((error) => {
     if (!state.config?.source || state.config.source !== "public") showSetup(true);
