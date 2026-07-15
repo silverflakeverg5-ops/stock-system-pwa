@@ -107,6 +107,7 @@ button, select {
 }
 .section-head p { color: var(--muted); font-size: 13px; margin-top: 4px; }
 
+.candidate-panel { margin-top: 16px; }
 .candidate-list {
   display: grid;
   gap: 10px;
@@ -139,7 +140,8 @@ button, select {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
   gap: 16px;
-  margin-top: 16px;
+  margin-top: 0;
+  scroll-margin-top: 92px;
 }
 .detail-panel, .chart-panel { padding: 16px; }
 .detail-grid {
@@ -200,7 +202,7 @@ canvas { width: 100%; margin-top: 10px; border: 1px solid var(--line); border-ra
   main { padding: 14px; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .metric-card { padding: 12px; }
-  .detail-layout { grid-template-columns: 1fr; }
+  .detail-layout { grid-template-columns: 1fr; scroll-margin-top: 84px; }
   .candidate-card { grid-template-columns: 1fr; }
   .detail-grid, .manual-grid { grid-template-columns: 1fr; }
   .manual-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
