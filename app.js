@@ -1,6 +1,8 @@
 const STORAGE_KEY = "stock-system-pwa-config";
-const APP_VERSION = "11";
+const APP_VERSION = "12";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
+const PAGE_SIZE = 1000;
+const MAX_CANDIDATE_ROWS = 10000;
 
 const ACTION_LABELS = {
   BUY_CANDIDATE: "買い候補",
@@ -171,6 +173,20 @@ async function fetchTable(table, params = {}) {
   return res.json();
 }
 
+async function fetchTablePaged(table, params = {}, pageSize = PAGE_SIZE, maxRows = MAX_CANDIDATE_ROWS) {
+  const rows = [];
+  for (let offset = 0; offset < maxRows; offset += pageSize) {
+    const page = await fetchTable(table, {
+      ...params,
+      limit: String(pageSize),
+      offset: String(offset),
+    });
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
 const number = (value, digits = 1) => {
   const n = Number(value);
   return Number.isFinite(n) ? n.toFixed(digits) : "-";
@@ -211,19 +227,17 @@ async function getNewestRunWithCandidates() {
     limit: "20",
   });
   for (const run of runs) {
-    const candidates = await fetchTable("stock_daily_candidates", {
+    const candidates = await fetchTablePaged("stock_daily_candidates", {
       select: "*",
       run_id: `eq.${run.run_id}`,
       order: "rank.asc,switch_priority_score.desc",
-      limit: "2000",
     });
     if (candidates.length > 0) return { run, candidates };
   }
 
-  const fallback = await fetchTable("stock_daily_candidates", {
+  const fallback = await fetchTablePaged("stock_daily_candidates", {
     select: "*",
     order: "created_at.desc",
-    limit: "2000",
   });
   if (!fallback.length) return { run: null, candidates: [] };
   const runId = fallback[0].run_id;
