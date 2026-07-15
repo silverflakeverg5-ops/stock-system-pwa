@@ -1,5 +1,6 @@
 const STORAGE_KEY = "stock-system-pwa-config";
-const APP_VERSION = "12";
+const CLIENT_ID_KEY = "stock-system-client-id";
+const APP_VERSION = "13";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 const PAGE_SIZE = 1000;
 const MAX_CANDIDATE_ROWS = 10000;
@@ -10,6 +11,13 @@ const ACTION_LABELS = {
   WAIT: "待機",
   SKIP: "見送り",
   ALL: "すべて",
+};
+
+const MANUAL_ACTION_LABELS = {
+  BUY_EXECUTED: "買った",
+  SKIP_DECIDED: "見送った",
+  SELL_EXECUTED: "決済した",
+  MEMO: "メモ",
 };
 
 const MARKET_LABELS = {
@@ -72,6 +80,7 @@ const state = {
   run: null,
   candidates: [],
   market: [],
+  manualActions: [],
   selectedCode: null,
   actionFilter: "BUY_CANDIDATE",
 };
@@ -117,6 +126,15 @@ function normalizeSupabaseUrl(input) {
   }
 }
 
+function getClientId() {
+  let id = localStorage.getItem(CLIENT_ID_KEY);
+  if (!id) {
+    id = `client_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(CLIENT_ID_KEY, id);
+  }
+  return id;
+}
+
 function loadManualConfig() {
   try {
     const config = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
@@ -155,12 +173,13 @@ function showSetup(show) {
   }
 }
 
-function supabaseHeaders() {
+function supabaseHeaders(extra = {}) {
   return {
     apikey: state.config.key,
     Authorization: `Bearer ${state.config.key}`,
     "Cache-Control": "no-store",
     Pragma: "no-cache",
+    ...extra,
   };
 }
 
@@ -169,6 +188,18 @@ async function fetchTable(table, params = {}) {
   const url = new URL(`${baseUrl}/rest/v1/${table}`);
   for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
   const res = await fetch(url, { headers: supabaseHeaders(), cache: "no-store" });
+  if (!res.ok) throw new Error(`${table}: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function insertTable(table, row) {
+  const baseUrl = normalizeSupabaseUrl(state.config.url);
+  const url = new URL(`${baseUrl}/rest/v1/${table}`);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: supabaseHeaders({ "Content-Type": "application/json", Prefer: "return=representation" }),
+    body: JSON.stringify(row),
+  });
   if (!res.ok) throw new Error(`${table}: ${res.status} ${await res.text()}`);
   return res.json();
 }
@@ -204,6 +235,7 @@ function stars(score) {
 }
 
 const actionLabel = (action) => ACTION_LABELS[action] || action || "-";
+const manualActionLabel = (action) => MANUAL_ACTION_LABELS[action] || action || "-";
 const marketLabel = (market) => MARKET_LABELS[market] || market || "-";
 const signalLabel = (signal) => SIGNAL_LABELS[signal] || String(signal || "-").replaceAll("_", " ");
 const signalChainLabel = (chain) => chain ? String(chain).split(" -> ").map((part) => signalLabel(part.trim())).join(" → ") : "-";
@@ -218,6 +250,12 @@ function actionClass(action) {
   if (action === "BUY_CANDIDATE") return "buy";
   if (action === "WATCH") return "watch";
   return "skip";
+}
+
+function latestManualAction(code) {
+  return state.manualActions
+    .filter((row) => String(row.code) === String(code))
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0] || null;
 }
 
 async function getNewestRunWithCandidates() {
@@ -247,6 +285,20 @@ async function getNewestRunWithCandidates() {
   };
 }
 
+async function loadManualActions(runId) {
+  try {
+    return await fetchTable("stock_manual_actions", {
+      select: "*",
+      run_id: `eq.${runId}`,
+      order: "created_at.desc",
+      limit: "1000",
+    });
+  } catch (error) {
+    console.warn("manual actions are not available yet", error);
+    return [];
+  }
+}
+
 async function loadData() {
   if (!state.config?.url || !state.config?.key) {
     showSetup(true);
@@ -270,6 +322,7 @@ async function loadData() {
   state.run = picked.run;
   state.candidates = picked.candidates;
   state.market = market;
+  state.manualActions = await loadManualActions(picked.run.run_id);
   state.selectedCode = state.candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || state.candidates[0]?.code || null;
   render();
 }
@@ -303,6 +356,8 @@ function renderCandidates() {
     const ep = expectedPrice(row);
     const gain = ep == null ? null : ep - Number(row.close_price);
     const active = row.code === state.selectedCode ? " active" : "";
+    const manual = latestManualAction(row.code);
+    const manualBadge = manual ? `<span class="manual-badge">${manualActionLabel(manual.action_type)}</span>` : "";
     return `
       <button class="candidate-card${active}" data-code="${row.code}" type="button">
         <div>
@@ -310,6 +365,7 @@ function renderCandidates() {
             <span class="code">${row.code}</span>
             <span class="name">${row.name || ""}</span>
             <span class="badge ${actionClass(row.suggested_action)}">${actionLabel(row.suggested_action)}</span>
+            ${manualBadge}
           </div>
           <div class="card-numbers">
             <span>score ${number(score)}</span>
@@ -394,6 +450,11 @@ function renderDetail() {
   }
   const ep = expectedPrice(row);
   const gain = ep == null ? null : ep - Number(row.close_price);
+  const manual = latestManualAction(row.code);
+  const manualText = manual
+    ? `${manualActionLabel(manual.action_type)} / ${manual.created_at ? new Date(manual.created_at).toLocaleString("ja-JP") : "時刻不明"}`
+    : "未記録";
+
   els.candidateDetail.innerHTML = `
     <div class="card-title">
       <span class="code">${row.code}</span>
@@ -410,12 +471,63 @@ function renderDetail() {
       <div class="detail-item"><span>期待日数</span><strong>${number(row.expected_days_to_max_gain)}日</strong></div>
       <div class="detail-item"><span>下落リスク</span><strong>${number(row.expected_downside_pct)}%</strong></div>
     </div>
+    <div class="manual-panel">
+      <strong>運用記録</strong>
+      <p id="manualActionStatus">${manualText}</p>
+      <div class="manual-grid">
+        <label>約定/判断価格<input id="manualPriceInput" type="number" inputmode="decimal" value="${Number(row.close_price) || ""}" /></label>
+        <label>株数<input id="manualQuantityInput" type="number" inputmode="numeric" placeholder="任意" /></label>
+      </div>
+      <textarea id="manualMemoInput" rows="2" placeholder="任意メモ。例: 寄りで買い、板薄いので見送り等"></textarea>
+      <div class="manual-actions">
+        <button class="primary-button" data-manual-action="BUY_EXECUTED" type="button">買った</button>
+        <button class="ghost-button" data-manual-action="SKIP_DECIDED" type="button">見送った</button>
+        <button class="ghost-button" data-manual-action="SELL_EXECUTED" type="button">決済した</button>
+        <button class="ghost-button" data-manual-action="MEMO" type="button">メモ保存</button>
+      </div>
+    </div>
     <div class="signal-box"><strong>シグナル</strong><br>${signalChainLabel(row.signal_chain || row.signal_name)}</div>
     <div class="signal-box"><strong>理由</strong><br>${row.reason || "-"}</div>
   `;
+
+  els.candidateDetail.querySelectorAll("[data-manual-action]").forEach((button) => {
+    button.addEventListener("click", () => saveManualAction(row, button.dataset.manualAction));
+  });
+
   loadChartForSelected().then(drawChart).catch((error) => {
     els.chartMeta.textContent = error.message;
   });
+}
+
+async function saveManualAction(row, actionType) {
+  const status = document.querySelector("#manualActionStatus");
+  const price = Number(document.querySelector("#manualPriceInput")?.value || row.close_price);
+  const quantityRaw = document.querySelector("#manualQuantityInput")?.value;
+  const quantity = quantityRaw ? Number(quantityRaw) : null;
+  const memo = document.querySelector("#manualMemoInput")?.value || "";
+  const payload = {
+    run_id: state.run?.run_id || row.run_id,
+    run_date: state.run?.run_date || row.run_date,
+    code: String(row.code),
+    name: row.name || null,
+    action_type: actionType,
+    trade_status: actionType === "BUY_EXECUTED" ? "BOUGHT" : actionType === "SELL_EXECUTED" ? "SOLD" : actionType === "SKIP_DECIDED" ? "SKIPPED" : "MEMO",
+    action_price: Number.isFinite(price) ? price : null,
+    quantity: Number.isFinite(quantity) ? quantity : null,
+    memo,
+    client_id: getClientId(),
+    candidate_payload: row,
+  };
+
+  try {
+    if (status) status.textContent = "保存中...";
+    const saved = await insertTable("stock_manual_actions", payload);
+    state.manualActions = [...saved, ...state.manualActions];
+    if (status) status.textContent = `${manualActionLabel(actionType)} を保存しました`;
+    render();
+  } catch (error) {
+    if (status) status.textContent = `保存できませんでした: ${error.message}`;
+  }
 }
 
 function render() {
