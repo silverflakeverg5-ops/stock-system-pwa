@@ -127,10 +127,11 @@ button, select {
 .card-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .code { font-size: 18px; font-weight: 800; }
 .name { color: var(--muted); font-size: 13px; }
-.badge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+.badge, .manual-badge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; }
 .badge.buy { background: #d1fae5; color: var(--buy); }
 .badge.watch { background: #fef3c7; color: var(--watch); }
 .badge.skip { background: #e2e8f0; color: var(--skip); }
+.manual-badge { background: #e0f2fe; color: #0369a1; }
 .card-numbers { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; color: var(--muted); font-size: 13px; }
 .priority-stars { color: #d97706; font-size: 18px; white-space: nowrap; }
 
@@ -155,7 +156,7 @@ button, select {
 }
 .detail-item span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
 .detail-item strong { font-size: 16px; }
-.signal-box {
+.signal-box, .manual-panel {
   margin-top: 12px;
   padding: 12px;
   border-radius: 6px;
@@ -164,6 +165,32 @@ button, select {
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
+.manual-panel p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.manual-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.manual-grid label { color: var(--muted); font-size: 12px; }
+.manual-grid input, .manual-panel textarea {
+  width: 100%;
+  margin-top: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+.manual-panel textarea { resize: vertical; margin-top: 10px; }
+.manual-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.manual-actions button { min-height: 42px; }
 .empty-state { color: var(--muted); padding: 18px 0; }
 canvas { width: 100%; margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .chart-meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
@@ -175,7 +202,8 @@ canvas { width: 100%; margin-top: 10px; border: 1px solid var(--line); border-ra
   .metric-card { padding: 12px; }
   .detail-layout { grid-template-columns: 1fr; }
   .candidate-card { grid-template-columns: 1fr; }
-  .detail-grid { grid-template-columns: 1fr; }
+  .detail-grid, .manual-grid { grid-template-columns: 1fr; }
+  .manual-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 380px) {
@@ -185,4 +213,5 @@ canvas { width: 100%; margin-top: 10px; border: 1px solid var(--line); border-ra
   .metric-card strong { font-size: 16px; }
   .section-head { align-items: flex-start; flex-direction: column; }
   .section-head select { width: 100%; }
+  .manual-actions { grid-template-columns: 1fr; }
 }
