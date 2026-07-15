@@ -1,6 +1,6 @@
 const STORAGE_KEY = "stock-system-pwa-config";
 const CLIENT_ID_KEY = "stock-system-client-id";
-const APP_VERSION = "13";
+const APP_VERSION = "14";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 const PAGE_SIZE = 1000;
 const MAX_CANDIDATE_ROWS = 10000;
@@ -99,6 +99,7 @@ const els = {
   runStatus: document.querySelector("#runStatus"),
   candidateList: document.querySelector("#candidateList"),
   actionFilter: document.querySelector("#actionFilter"),
+  detailSection: document.querySelector("#detailSection"),
   candidateDetail: document.querySelector("#candidateDetail"),
   priceChart: document.querySelector("#priceChart"),
   chartMeta: document.querySelector("#chartMeta"),
@@ -258,6 +259,14 @@ function latestManualAction(code) {
     .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0] || null;
 }
 
+function selectCandidate(code, shouldScroll = false) {
+  state.selectedCode = code;
+  render();
+  if (shouldScroll && els.detailSection) {
+    requestAnimationFrame(() => els.detailSection.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+}
+
 async function getNewestRunWithCandidates() {
   const runs = await fetchTable("stock_operation_runs", {
     select: "*",
@@ -379,10 +388,7 @@ function renderCandidates() {
   }).join("");
 
   els.candidateList.querySelectorAll(".candidate-card").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.selectedCode = button.dataset.code;
-      render();
-    });
+    button.addEventListener("click", () => selectCandidate(button.dataset.code, true));
   });
 }
 
