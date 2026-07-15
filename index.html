@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101820" />
     <title>Stock System Ops</title>
-    <link rel="manifest" href="manifest.webmanifest?v=13" />
-    <link rel="stylesheet" href="styles.css?v=13" />
+    <link rel="manifest" href="manifest.webmanifest?v=14" />
+    <link rel="stylesheet" href="styles.css?v=14" />
   </head>
   <body>
     <header class="app-header">
@@ -54,7 +54,19 @@
         </article>
       </section>
 
-      <section class="panel">
+      <section id="detailSection" class="detail-layout">
+        <article class="panel detail-panel">
+          <h2>詳細</h2>
+          <div id="candidateDetail" class="empty-state">候補を選択してください。</div>
+        </article>
+        <article class="panel chart-panel">
+          <h2>チャート</h2>
+          <canvas id="priceChart" height="220"></canvas>
+          <div id="chartMeta" class="chart-meta">チャートデータ待ち</div>
+        </article>
+      </section>
+
+      <section class="panel candidate-panel">
         <div class="section-head">
           <div>
             <h2>今日の候補</h2>
@@ -68,20 +80,8 @@
         </div>
         <div id="candidateList" class="candidate-list"></div>
       </section>
-
-      <section class="detail-layout">
-        <article class="panel detail-panel">
-          <h2>詳細</h2>
-          <div id="candidateDetail" class="empty-state">候補を選択してください。</div>
-        </article>
-        <article class="panel chart-panel">
-          <h2>チャート</h2>
-          <canvas id="priceChart" height="220"></canvas>
-          <div id="chartMeta" class="chart-meta">チャートデータ待ち</div>
-        </article>
-      </section>
     </main>
 
-    <script src="app.js?v=13" type="module"></script>
+    <script src="app.js?v=14" type="module"></script>
   </body>
 </html>
