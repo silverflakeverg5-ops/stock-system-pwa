@@ -1,5 +1,5 @@
 (function () {
-  const APP_FIX_VERSION = "4";
+  const APP_FIX_VERSION = "5";
   const STORAGE_KEY = "stock-system-pwa-config";
   const PUBLIC_CONFIG_PATH = `public-config.json?v=16-${APP_FIX_VERSION}`;
   const DESIRED_DETAIL_ORDER = [
@@ -13,6 +13,8 @@
     "下落リスク",
     "5日平均売買代金",
     "流動性",
+    "貸借倍率",
+    "貸借評価",
   ];
 
   let configCache = null;
@@ -93,6 +95,11 @@
     return Number.isFinite(n) ? Math.round(n).toLocaleString("ja-JP") : "-";
   }
 
+  function pctOrDash(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n.toFixed(2) : "-";
+  }
+
   function liquidityLabel(value) {
     return {
       very_thin: "かなり薄い",
@@ -100,6 +107,18 @@
       normal: "普通",
       liquid: "十分",
       unknown: "不明",
+    }[String(value)] || String(value || "不明");
+  }
+
+  function marginLabel(value) {
+    return {
+      unknown: "不明",
+      no_short_balance: "売り残なし",
+      short_squeeze_strong: "踏み上げ期待 強",
+      short_squeeze_watch: "踏み上げ期待",
+      neutral: "中立",
+      buy_balance_heavy: "信用買い重め",
+      buy_balance_very_heavy: "信用買いかなり重い",
     }[String(value)] || String(value || "不明");
   }
 
@@ -227,6 +246,8 @@
       if (!grid || !Object.keys(payload).length) return;
       addOrUpdateDetailItem(grid, "5日平均売買代金", yen(payload.avg_turnover_5d_yen));
       addOrUpdateDetailItem(grid, "流動性", `${liquidityLabel(payload.liquidity_bucket)} x${Number(payload.liquidity_multiplier || 1).toFixed(2)}`);
+      addOrUpdateDetailItem(grid, "貸借倍率", pctOrDash(payload.margin_ratio));
+      addOrUpdateDetailItem(grid, "貸借評価", `${marginLabel(payload.margin_signal)} x${Number(payload.margin_multiplier || 1).toFixed(2)}`);
       reorderDetailItems();
     } catch {
       lastLiquidityKey = "";
