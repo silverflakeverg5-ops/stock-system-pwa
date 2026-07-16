@@ -1,5 +1,5 @@
 (function () {
-  const APP_FIX_VERSION = "2";
+  const APP_FIX_VERSION = "3";
   const STORAGE_KEY = "stock-system-pwa-config";
   const PUBLIC_CONFIG_PATH = `public-config.json?v=16-${APP_FIX_VERSION}`;
   const DESIRED_DETAIL_ORDER = [
@@ -15,6 +15,8 @@
 
   let configCache = null;
   let lastChartKey = "";
+  let chartRefreshTimer = null;
+  let chartFetchInFlight = false;
 
   function normalizeSupabaseUrl(input) {
     const raw = String(input || "").trim();
@@ -162,19 +164,33 @@
     return latestRows.reverse();
   }
 
-  async function refreshChart() {
+  function chartLooksEmpty() {
+    const meta = document.querySelector("#chartMeta")?.textContent || "";
+    return !meta || meta.includes("ありません") || meta.includes("待ち") || meta.includes("stock_candidate_charts");
+  }
+
+  async function refreshChart({ force = false } = {}) {
     const code = getSelectedCode();
     const runId = getCurrentRunId();
     const key = `${runId}:${code}`;
-    if (!code || key === lastChartKey) return;
+    if (!code || chartFetchInFlight) return;
+    if (!force && key === lastChartKey && !chartLooksEmpty()) return;
     lastChartKey = key;
+    chartFetchInFlight = true;
     try {
       const rows = await loadChartRows(code);
       drawChart(rows);
     } catch (error) {
       const meta = document.querySelector("#chartMeta");
       if (meta) meta.textContent = error.message;
+    } finally {
+      chartFetchInFlight = false;
     }
+  }
+
+  function scheduleChartRefresh(force = false) {
+    window.clearTimeout(chartRefreshTimer);
+    chartRefreshTimer = window.setTimeout(() => refreshChart({ force }), 200);
   }
 
   function reorderDetailItems() {
@@ -207,7 +223,7 @@
 
   function refreshFixes() {
     reorderDetailItems();
-    refreshChart();
+    scheduleChartRefresh(chartLooksEmpty());
   }
 
   const observer = new MutationObserver(() => {
@@ -215,11 +231,11 @@
   });
 
   window.addEventListener("DOMContentLoaded", () => {
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     refreshFixes();
   });
   window.addEventListener("resize", () => {
     lastChartKey = "";
-    refreshChart();
+    scheduleChartRefresh(true);
   });
 })();
