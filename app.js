@@ -1,6 +1,7 @@
 const STORAGE_KEY = "stock-system-pwa-config";
 const CLIENT_ID_KEY = "stock-system-client-id";
-const APP_VERSION = "14";
+const CASH_KEY = "stock-system-initial-cash";
+const APP_VERSION = "15";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 const PAGE_SIZE = 1000;
 const MAX_CANDIDATE_ROWS = 10000;
@@ -18,6 +19,8 @@ const MANUAL_ACTION_LABELS = {
   SKIP_DECIDED: "見送った",
   SELL_EXECUTED: "決済した",
   MEMO: "メモ",
+  WATCH_ADDED: "監視中",
+  WATCH_REMOVED: "監視解除",
 };
 
 const MARKET_LABELS = {
@@ -83,6 +86,8 @@ const state = {
   manualActions: [],
   selectedCode: null,
   actionFilter: "BUY_CANDIDATE",
+  activeTab: "candidates",
+  initialCash: Number(localStorage.getItem(CASH_KEY) || 100000),
 };
 
 const els = {
@@ -94,7 +99,7 @@ const els = {
   refreshButton: document.querySelector("#refreshButton"),
   marketRegime: document.querySelector("#marketRegime"),
   buyCount: document.querySelector("#buyCount"),
-  watchCount: document.querySelector("#watchCount"),
+  holdingCount: document.querySelector("#holdingCount"),
   runDate: document.querySelector("#runDate"),
   runStatus: document.querySelector("#runStatus"),
   candidateList: document.querySelector("#candidateList"),
@@ -103,6 +108,16 @@ const els = {
   candidateDetail: document.querySelector("#candidateDetail"),
   priceChart: document.querySelector("#priceChart"),
   chartMeta: document.querySelector("#chartMeta"),
+  tabButtons: document.querySelectorAll(".tab-button"),
+  tabViews: document.querySelectorAll(".tab-view"),
+  initialCashInput: document.querySelector("#initialCashInput"),
+  saveCashButton: document.querySelector("#saveCashButton"),
+  availableCash: document.querySelector("#availableCash"),
+  totalEquity: document.querySelector("#totalEquity"),
+  unrealizedPnl: document.querySelector("#unrealizedPnl"),
+  realizedPnl: document.querySelector("#realizedPnl"),
+  holdingsList: document.querySelector("#holdingsList"),
+  watchlistList: document.querySelector("#watchlistList"),
 };
 
 async function clearOldServiceWorker() {
@@ -208,11 +223,7 @@ async function insertTable(table, row) {
 async function fetchTablePaged(table, params = {}, pageSize = PAGE_SIZE, maxRows = MAX_CANDIDATE_ROWS) {
   const rows = [];
   for (let offset = 0; offset < maxRows; offset += pageSize) {
-    const page = await fetchTable(table, {
-      ...params,
-      limit: String(pageSize),
-      offset: String(offset),
-    });
+    const page = await fetchTable(table, { ...params, limit: String(pageSize), offset: String(offset) });
     rows.push(...page);
     if (page.length < pageSize) break;
   }
@@ -223,10 +234,19 @@ const number = (value, digits = 1) => {
   const n = Number(value);
   return Number.isFinite(n) ? n.toFixed(digits) : "-";
 };
-
 const yen = (value) => {
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n).toLocaleString("ja-JP") : "-";
+};
+const yenSigned = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n >= 0 ? "+" : "-"}${yen(Math.abs(n))}`;
+};
+const pctSigned = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 };
 
 function stars(score) {
@@ -259,20 +279,24 @@ function latestManualAction(code) {
     .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0] || null;
 }
 
+function latestCandidate(code) {
+  return state.candidates.find((row) => String(row.code) === String(code));
+}
+
 function selectCandidate(code, shouldScroll = false) {
   state.selectedCode = code;
+  state.activeTab = "candidates";
   render();
-  if (shouldScroll && els.detailSection) {
-    requestAnimationFrame(() => els.detailSection.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
+  if (shouldScroll && els.detailSection) requestAnimationFrame(() => els.detailSection.scrollIntoView({ behavior: "smooth", block: "start" }));
+}
+
+function setActiveTab(tab) {
+  state.activeTab = tab;
+  render();
 }
 
 async function getNewestRunWithCandidates() {
-  const runs = await fetchTable("stock_operation_runs", {
-    select: "*",
-    order: "created_at.desc",
-    limit: "20",
-  });
+  const runs = await fetchTable("stock_operation_runs", { select: "*", order: "created_at.desc", limit: "20" });
   for (const run of runs) {
     const candidates = await fetchTablePaged("stock_daily_candidates", {
       select: "*",
@@ -281,11 +305,7 @@ async function getNewestRunWithCandidates() {
     });
     if (candidates.length > 0) return { run, candidates };
   }
-
-  const fallback = await fetchTablePaged("stock_daily_candidates", {
-    select: "*",
-    order: "created_at.desc",
-  });
+  const fallback = await fetchTablePaged("stock_daily_candidates", { select: "*", order: "created_at.desc" });
   if (!fallback.length) return { run: null, candidates: [] };
   const runId = fallback[0].run_id;
   return {
@@ -294,13 +314,13 @@ async function getNewestRunWithCandidates() {
   };
 }
 
-async function loadManualActions(runId) {
+async function loadManualActions() {
   try {
     return await fetchTable("stock_manual_actions", {
       select: "*",
-      run_id: `eq.${runId}`,
+      client_id: `eq.${getClientId()}`,
       order: "created_at.desc",
-      limit: "1000",
+      limit: "2000",
     });
   } catch (error) {
     console.warn("manual actions are not available yet", error);
@@ -314,37 +334,101 @@ async function loadData() {
     els.runStatus.textContent = "Supabase接続設定を入力してください。";
     return;
   }
-
   showSetup(false);
   els.runStatus.textContent = `読み込み中... ${normalizeSupabaseUrl(state.config.url)}`;
-
   const picked = await getNewestRunWithCandidates();
   if (!picked.run || !picked.candidates.length) throw new Error("表示できる候補がありません。");
-
   const market = await fetchTable("stock_daily_market_summary", {
     select: "*",
     run_id: `eq.${picked.run.run_id}`,
     order: "date.desc",
     limit: "30",
   });
-
   state.run = picked.run;
   state.candidates = picked.candidates;
   state.market = market;
-  state.manualActions = await loadManualActions(picked.run.run_id);
+  state.manualActions = await loadManualActions();
   state.selectedCode = state.candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || state.candidates[0]?.code || null;
   render();
 }
 
+function buildPortfolio() {
+  const actions = [...state.manualActions].sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+  const positions = new Map();
+  let cash = Number(state.initialCash) || 0;
+  let realized = 0;
+  for (const action of actions) {
+    const code = String(action.code);
+    if (!positions.has(code)) {
+      positions.set(code, { code, name: action.name || latestCandidate(code)?.name || "", qty: 0, cost: 0, unknownOpen: false, lastAction: action });
+    }
+    const pos = positions.get(code);
+    pos.name = pos.name || action.name || latestCandidate(code)?.name || "";
+    pos.lastAction = action;
+    const price = Number(action.action_price);
+    const qty = Number(action.quantity);
+    if (action.action_type === "BUY_EXECUTED") {
+      if (Number.isFinite(price) && Number.isFinite(qty) && qty > 0) {
+        pos.qty += qty;
+        pos.cost += price * qty;
+        cash -= price * qty;
+      } else {
+        pos.unknownOpen = true;
+      }
+    }
+    if (action.action_type === "SELL_EXECUTED") {
+      if (Number.isFinite(price) && Number.isFinite(qty) && qty > 0 && pos.qty > 0) {
+        const sellQty = Math.min(qty, pos.qty);
+        const avg = pos.cost / pos.qty;
+        realized += (price - avg) * sellQty;
+        pos.qty -= sellQty;
+        pos.cost -= avg * sellQty;
+        cash += price * sellQty;
+      } else {
+        pos.unknownOpen = false;
+      }
+    }
+  }
+  const holdings = [...positions.values()].filter((pos) => pos.qty > 0 || pos.unknownOpen).map((pos) => {
+    const candidate = latestCandidate(pos.code) || {};
+    const currentPrice = Number(candidate.close_price) || Number(pos.lastAction?.action_price) || 0;
+    const marketValue = pos.qty > 0 ? currentPrice * pos.qty : null;
+    const avgPrice = pos.qty > 0 ? pos.cost / pos.qty : null;
+    const unrealized = pos.qty > 0 ? marketValue - pos.cost : null;
+    const unrealizedPct = pos.qty > 0 && pos.cost > 0 ? (unrealized / pos.cost) * 100 : null;
+    return { ...pos, candidate, currentPrice, marketValue, avgPrice, unrealized, unrealizedPct };
+  });
+  const marketValue = holdings.reduce((sum, pos) => sum + (Number(pos.marketValue) || 0), 0);
+  const unrealized = holdings.reduce((sum, pos) => sum + (Number(pos.unrealized) || 0), 0);
+  return { holdings, cash, marketValue, totalEquity: cash + marketValue, realized, unrealized };
+}
+
+function buildUserWatchlist() {
+  const latestByCode = new Map();
+  for (const action of state.manualActions) {
+    if (!["WATCH_ADDED", "WATCH_REMOVED"].includes(action.action_type)) continue;
+    const old = latestByCode.get(String(action.code));
+    if (!old || String(action.created_at || "") > String(old.created_at || "")) latestByCode.set(String(action.code), action);
+  }
+  return [...latestByCode.values()]
+    .filter((action) => action.action_type === "WATCH_ADDED")
+    .map((action) => ({ action, candidate: latestCandidate(action.code) || action.candidate_payload || {} }));
+}
+
+function renderTabs() {
+  els.tabButtons.forEach((button) => button.classList.toggle("active", button.dataset.tab === state.activeTab));
+  els.tabViews.forEach((view) => view.classList.toggle("active", view.id === `${state.activeTab}View`));
+}
+
 function renderSummary() {
+  const portfolio = buildPortfolio();
   const market = state.market[0] || {};
   const buy = state.candidates.filter((r) => r.suggested_action === "BUY_CANDIDATE").length;
-  const watch = state.candidates.filter((r) => r.suggested_action === "WATCH").length;
   const rawMarket = market.market_regime_5 || state.candidates[0]?.market_regime_5 || Object.keys(state.run?.report?.market_counts || {})[0] || "-";
   els.marketRegime.textContent = marketLabel(rawMarket);
   els.marketRegime.title = rawMarket;
   els.buyCount.textContent = String(buy);
-  els.watchCount.textContent = String(watch);
+  els.holdingCount.textContent = String(portfolio.holdings.length);
   els.runDate.textContent = state.run?.run_date || state.candidates[0]?.run_date || "-";
   els.runStatus.textContent = `run_id: ${state.run?.run_id || "-"} / 表示候補 ${state.candidates.length}件`;
 }
@@ -386,7 +470,6 @@ function renderCandidates() {
         <div class="priority-stars" aria-label="優先度 ${stars(score)}">${stars(score)}</div>
       </button>`;
   }).join("");
-
   els.candidateList.querySelectorAll(".candidate-card").forEach((button) => {
     button.addEventListener("click", () => selectCandidate(button.dataset.code, true));
   });
@@ -411,7 +494,6 @@ function drawChart(rows) {
   canvas.height = Math.floor(220 * dpr);
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, rect.width, 220);
-
   if (!rows.length) {
     els.chartMeta.textContent = "チャートデータがありません。";
     return;
@@ -423,7 +505,6 @@ function drawChart(rows) {
   const w = rect.width || 360;
   const h = 220;
   const span = max - min || 1;
-
   ctx.strokeStyle = "#d9e0e8";
   ctx.lineWidth = 1;
   for (let i = 0; i < 4; i++) {
@@ -433,7 +514,6 @@ function drawChart(rows) {
     ctx.lineTo(w - pad, y);
     ctx.stroke();
   }
-
   ctx.strokeStyle = "#0f766e";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -457,10 +537,7 @@ function renderDetail() {
   const ep = expectedPrice(row);
   const gain = ep == null ? null : ep - Number(row.close_price);
   const manual = latestManualAction(row.code);
-  const manualText = manual
-    ? `${manualActionLabel(manual.action_type)} / ${manual.created_at ? new Date(manual.created_at).toLocaleString("ja-JP") : "時刻不明"}`
-    : "未記録";
-
+  const manualText = manual ? `${manualActionLabel(manual.action_type)} / ${manual.created_at ? new Date(manual.created_at).toLocaleString("ja-JP") : "時刻不明"}` : "未記録";
   els.candidateDetail.innerHTML = `
     <div class="card-title">
       <span class="code">${row.code}</span>
@@ -489,20 +566,71 @@ function renderDetail() {
         <button class="primary-button" data-manual-action="BUY_EXECUTED" type="button">買った</button>
         <button class="ghost-button" data-manual-action="SKIP_DECIDED" type="button">見送った</button>
         <button class="ghost-button" data-manual-action="SELL_EXECUTED" type="button">決済した</button>
+        <button class="ghost-button" data-manual-action="WATCH_ADDED" type="button">監視追加</button>
+        <button class="ghost-button" data-manual-action="WATCH_REMOVED" type="button">監視解除</button>
         <button class="ghost-button" data-manual-action="MEMO" type="button">メモ保存</button>
       </div>
     </div>
     <div class="signal-box"><strong>シグナル</strong><br>${signalChainLabel(row.signal_chain || row.signal_name)}</div>
     <div class="signal-box"><strong>理由</strong><br>${row.reason || "-"}</div>
   `;
-
   els.candidateDetail.querySelectorAll("[data-manual-action]").forEach((button) => {
     button.addEventListener("click", () => saveManualAction(row, button.dataset.manualAction));
   });
+  loadChartForSelected().then(drawChart).catch((error) => { els.chartMeta.textContent = error.message; });
+}
 
-  loadChartForSelected().then(drawChart).catch((error) => {
-    els.chartMeta.textContent = error.message;
-  });
+function renderPortfolio() {
+  const p = buildPortfolio();
+  els.initialCashInput.value = Number(state.initialCash) || 100000;
+  els.availableCash.textContent = yen(p.cash);
+  els.totalEquity.textContent = yen(p.totalEquity);
+  els.unrealizedPnl.textContent = yenSigned(p.unrealized);
+  els.realizedPnl.textContent = yenSigned(p.realized);
+  if (!p.holdings.length) {
+    els.holdingsList.innerHTML = `<div class="empty-state">保有記録はまだありません。詳細画面で株数を入れて「買った」を保存してください。</div>`;
+    return;
+  }
+  els.holdingsList.innerHTML = p.holdings.map((pos) => `
+    <button class="candidate-card" data-code="${pos.code}" type="button">
+      <div>
+        <div class="card-title"><span class="code">${pos.code}</span><span class="name">${pos.name || ""}</span><span class="manual-badge">保有中</span></div>
+        <div class="card-numbers">
+          <span>数量 ${pos.qty > 0 ? number(pos.qty, 0) : "未入力"}</span>
+          <span>平均 ${pos.avgPrice ? yen(pos.avgPrice) : "-"}</span>
+          <span>現在 ${yen(pos.currentPrice)}</span>
+          <span>評価 ${pos.marketValue ? yen(pos.marketValue) : "-"}</span>
+          <span>損益 ${pos.unrealized == null ? "-" : yenSigned(pos.unrealized)} ${pos.unrealizedPct == null ? "" : `(${pctSigned(pos.unrealizedPct)})`}</span>
+        </div>
+      </div>
+    </button>
+  `).join("");
+  els.holdingsList.querySelectorAll(".candidate-card").forEach((button) => button.addEventListener("click", () => selectCandidate(button.dataset.code, true)));
+}
+
+function renderWatchlist() {
+  const rows = buildUserWatchlist();
+  if (!rows.length) {
+    els.watchlistList.innerHTML = `<div class="empty-state">ユーザー監視銘柄はまだありません。詳細画面から「監視追加」を押してください。</div>`;
+    return;
+  }
+  els.watchlistList.innerHTML = rows.map(({ action, candidate }) => {
+    const ep = expectedPrice(candidate);
+    const gain = ep == null ? null : ep - Number(candidate.close_price);
+    return `
+      <button class="candidate-card" data-code="${action.code}" type="button">
+        <div>
+          <div class="card-title"><span class="code">${action.code}</span><span class="name">${candidate.name || action.name || ""}</span><span class="manual-badge">監視中</span></div>
+          <div class="card-numbers">
+            <span>値段 ${yen(candidate.close_price || action.action_price)}</span>
+            <span>期待 ${number(candidate.expected_upside_pct)}%</span>
+            <span>見込み +${yen(gain)}</span>
+            <span>追加 ${action.created_at ? new Date(action.created_at).toLocaleDateString("ja-JP") : "-"}</span>
+          </div>
+        </div>
+      </button>`;
+  }).join("");
+  els.watchlistList.querySelectorAll(".candidate-card").forEach((button) => button.addEventListener("click", () => selectCandidate(button.dataset.code, true)));
 }
 
 async function saveManualAction(row, actionType) {
@@ -517,14 +645,13 @@ async function saveManualAction(row, actionType) {
     code: String(row.code),
     name: row.name || null,
     action_type: actionType,
-    trade_status: actionType === "BUY_EXECUTED" ? "BOUGHT" : actionType === "SELL_EXECUTED" ? "SOLD" : actionType === "SKIP_DECIDED" ? "SKIPPED" : "MEMO",
+    trade_status: actionType === "BUY_EXECUTED" ? "BOUGHT" : actionType === "SELL_EXECUTED" ? "SOLD" : actionType === "SKIP_DECIDED" ? "SKIPPED" : actionType === "WATCH_ADDED" ? "WATCHING" : actionType === "WATCH_REMOVED" ? "UNWATCHED" : "MEMO",
     action_price: Number.isFinite(price) ? price : null,
     quantity: Number.isFinite(quantity) ? quantity : null,
     memo,
     client_id: getClientId(),
     candidate_payload: row,
   };
-
   try {
     if (status) status.textContent = "保存中...";
     const saved = await insertTable("stock_manual_actions", payload);
@@ -537,9 +664,12 @@ async function saveManualAction(row, actionType) {
 }
 
 function render() {
+  renderTabs();
   renderSummary();
   renderCandidates();
   renderDetail();
+  renderPortfolio();
+  renderWatchlist();
 }
 
 els.saveConfigButton.addEventListener("click", () => {
@@ -548,12 +678,8 @@ els.saveConfigButton.addEventListener("click", () => {
   if (!url || !key) return;
   saveConfig({ url, key });
   els.supabaseUrlInput.value = url;
-  loadData().catch((error) => {
-    showSetup(true);
-    els.runStatus.textContent = error.message;
-  });
+  loadData().catch((error) => { showSetup(true); els.runStatus.textContent = error.message; });
 });
-
 els.clearConfigButton.addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
   state.config = null;
@@ -561,16 +687,16 @@ els.clearConfigButton.addEventListener("click", () => {
   els.supabaseKeyInput.value = "";
   showSetup(true);
 });
-
-els.refreshButton.addEventListener("click", () => {
-  loadData().catch((error) => {
-    els.runStatus.textContent = error.message;
-  });
-});
-
-els.actionFilter.addEventListener("change", () => {
-  state.actionFilter = els.actionFilter.value;
-  render();
+els.refreshButton.addEventListener("click", () => loadData().catch((error) => { els.runStatus.textContent = error.message; }));
+els.actionFilter.addEventListener("change", () => { state.actionFilter = els.actionFilter.value; render(); });
+els.tabButtons.forEach((button) => button.addEventListener("click", () => setActiveTab(button.dataset.tab)));
+els.saveCashButton.addEventListener("click", () => {
+  const cash = Number(els.initialCashInput.value || 0);
+  if (Number.isFinite(cash) && cash > 0) {
+    state.initialCash = cash;
+    localStorage.setItem(CASH_KEY, String(cash));
+    renderPortfolio();
+  }
 });
 
 async function initialize() {
@@ -583,5 +709,4 @@ async function initialize() {
     els.runStatus.textContent = error.message;
   });
 }
-
 initialize();
