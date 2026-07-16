@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101820" />
     <title>Stock System Ops</title>
-    <link rel="manifest" href="manifest.webmanifest?v=14" />
-    <link rel="stylesheet" href="styles.css?v=14" />
+    <link rel="manifest" href="manifest.webmanifest?v=15" />
+    <link rel="stylesheet" href="styles.css?v=15" />
   </head>
   <body>
     <header class="app-header">
@@ -45,8 +45,8 @@
           <strong id="buyCount">-</strong>
         </article>
         <article class="metric-card">
-          <span>監視</span>
-          <strong id="watchCount">-</strong>
+          <span>保有</span>
+          <strong id="holdingCount">-</strong>
         </article>
         <article class="metric-card">
           <span>更新日</span>
@@ -54,34 +54,76 @@
         </article>
       </section>
 
-      <section id="detailSection" class="detail-layout">
-        <article class="panel detail-panel">
-          <h2>詳細</h2>
-          <div id="candidateDetail" class="empty-state">候補を選択してください。</div>
-        </article>
-        <article class="panel chart-panel">
-          <h2>チャート</h2>
-          <canvas id="priceChart" height="220"></canvas>
-          <div id="chartMeta" class="chart-meta">チャートデータ待ち</div>
-        </article>
+      <nav class="tab-bar" aria-label="表示切替">
+        <button class="tab-button active" data-tab="candidates" type="button">候補</button>
+        <button class="tab-button" data-tab="holdings" type="button">保有銘柄</button>
+        <button class="tab-button" data-tab="watchlist" type="button">監視銘柄</button>
+      </nav>
+
+      <section id="candidatesView" class="tab-view active">
+        <section id="detailSection" class="detail-layout">
+          <article class="panel detail-panel">
+            <h2>詳細</h2>
+            <div id="candidateDetail" class="empty-state">候補を選択してください。</div>
+          </article>
+          <article class="panel chart-panel">
+            <h2>チャート</h2>
+            <canvas id="priceChart" height="220"></canvas>
+            <div id="chartMeta" class="chart-meta">チャートデータ待ち</div>
+          </article>
+        </section>
+
+        <section class="panel candidate-panel">
+          <div class="section-head">
+            <div>
+              <h2>今日の候補</h2>
+              <p id="runStatus">読み込み待ち</p>
+            </div>
+            <select id="actionFilter" aria-label="候補種別">
+              <option value="BUY_CANDIDATE">買い候補</option>
+              <option value="WATCH">監視</option>
+              <option value="ALL">すべて</option>
+            </select>
+          </div>
+          <div id="candidateList" class="candidate-list"></div>
+        </section>
       </section>
 
-      <section class="panel candidate-panel">
-        <div class="section-head">
-          <div>
-            <h2>今日の候補</h2>
-            <p id="runStatus">読み込み待ち</p>
+      <section id="holdingsView" class="tab-view">
+        <section class="panel portfolio-panel">
+          <div class="section-head">
+            <div>
+              <h2>保有銘柄・資産</h2>
+              <p>株数を入力して「買った」「決済した」を記録した銘柄を集計します。</p>
+            </div>
           </div>
-          <select id="actionFilter" aria-label="候補種別">
-            <option value="BUY_CANDIDATE">買い候補</option>
-            <option value="WATCH">監視</option>
-            <option value="ALL">すべて</option>
-          </select>
-        </div>
-        <div id="candidateList" class="candidate-list"></div>
+          <div class="portfolio-settings">
+            <label>運用元本<input id="initialCashInput" type="number" inputmode="numeric" /></label>
+            <button id="saveCashButton" class="ghost-button" type="button">元本を保存</button>
+          </div>
+          <div class="summary-grid compact">
+            <article class="metric-card"><span>運用可能額</span><strong id="availableCash">-</strong></article>
+            <article class="metric-card"><span>資産合計</span><strong id="totalEquity">-</strong></article>
+            <article class="metric-card"><span>評価損益</span><strong id="unrealizedPnl">-</strong></article>
+            <article class="metric-card"><span>実現損益</span><strong id="realizedPnl">-</strong></article>
+          </div>
+          <div id="holdingsList" class="candidate-list"></div>
+        </section>
+      </section>
+
+      <section id="watchlistView" class="tab-view">
+        <section class="panel portfolio-panel">
+          <div class="section-head">
+            <div>
+              <h2>ユーザー監視銘柄</h2>
+              <p>詳細画面の「監視追加」で登録した銘柄です。</p>
+            </div>
+          </div>
+          <div id="watchlistList" class="candidate-list"></div>
+        </section>
       </section>
     </main>
 
-    <script src="app.js?v=14" type="module"></script>
+    <script src="app.js?v=15" type="module"></script>
   </body>
 </html>
