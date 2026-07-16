@@ -1,5 +1,5 @@
 (function () {
-  const APP_FIX_VERSION = "3";
+  const APP_FIX_VERSION = "4";
   const STORAGE_KEY = "stock-system-pwa-config";
   const PUBLIC_CONFIG_PATH = `public-config.json?v=16-${APP_FIX_VERSION}`;
   const DESIRED_DETAIL_ORDER = [
@@ -11,12 +11,17 @@
     "期待到達価格",
     "見込み上昇値",
     "下落リスク",
+    "5日平均売買代金",
+    "流動性",
   ];
 
   let configCache = null;
   let lastChartKey = "";
+  let lastLiquidityKey = "";
   let chartRefreshTimer = null;
+  let liquidityRefreshTimer = null;
   let chartFetchInFlight = false;
+  let liquidityFetchInFlight = false;
 
   function normalizeSupabaseUrl(input) {
     const raw = String(input || "").trim();
@@ -86,6 +91,16 @@
   function yen(value) {
     const n = Number(value);
     return Number.isFinite(n) ? Math.round(n).toLocaleString("ja-JP") : "-";
+  }
+
+  function liquidityLabel(value) {
+    return {
+      very_thin: "かなり薄い",
+      thin: "薄い",
+      normal: "普通",
+      liquid: "十分",
+      unknown: "不明",
+    }[String(value)] || String(value || "不明");
   }
 
   function closeValue(row) {
@@ -193,6 +208,50 @@
     chartRefreshTimer = window.setTimeout(() => refreshChart({ force }), 200);
   }
 
+  async function refreshLiquidityDetail() {
+    const code = getSelectedCode();
+    const runId = getCurrentRunId();
+    const key = `${runId}:${code}`;
+    if (!code || !runId || liquidityFetchInFlight || key === lastLiquidityKey) return;
+    lastLiquidityKey = key;
+    liquidityFetchInFlight = true;
+    try {
+      const rows = await fetchTable("stock_daily_candidates", {
+        select: "payload",
+        run_id: `eq.${runId}`,
+        code: `eq.${code}`,
+        limit: "1",
+      });
+      const payload = rows[0]?.payload || {};
+      const grid = document.querySelector(".detail-grid");
+      if (!grid || !Object.keys(payload).length) return;
+      addOrUpdateDetailItem(grid, "5日平均売買代金", yen(payload.avg_turnover_5d_yen));
+      addOrUpdateDetailItem(grid, "流動性", `${liquidityLabel(payload.liquidity_bucket)} x${Number(payload.liquidity_multiplier || 1).toFixed(2)}`);
+      reorderDetailItems();
+    } catch {
+      lastLiquidityKey = "";
+    } finally {
+      liquidityFetchInFlight = false;
+    }
+  }
+
+  function scheduleLiquidityRefresh() {
+    window.clearTimeout(liquidityRefreshTimer);
+    liquidityRefreshTimer = window.setTimeout(refreshLiquidityDetail, 250);
+  }
+
+  function addOrUpdateDetailItem(grid, label, value) {
+    const existing = Array.from(grid.querySelectorAll(".detail-item")).find((item) => item.querySelector("span")?.textContent?.trim() === label);
+    if (existing) {
+      existing.querySelector("strong").textContent = value;
+      return;
+    }
+    const item = document.createElement("div");
+    item.className = "detail-item";
+    item.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+    grid.appendChild(item);
+  }
+
   function reorderDetailItems() {
     const grid = document.querySelector(".detail-grid");
     if (!grid) return;
@@ -223,6 +282,7 @@
 
   function refreshFixes() {
     reorderDetailItems();
+    scheduleLiquidityRefresh();
     scheduleChartRefresh(chartLooksEmpty());
   }
 
