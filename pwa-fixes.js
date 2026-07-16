@@ -1,5 +1,5 @@
 (function () {
-  const APP_FIX_VERSION = "1";
+  const APP_FIX_VERSION = "2";
   const STORAGE_KEY = "stock-system-pwa-config";
   const PUBLIC_CONFIG_PATH = `public-config.json?v=16-${APP_FIX_VERSION}`;
   const DESIRED_DETAIL_ORDER = [
@@ -8,7 +8,6 @@
     "期待値",
     "期待日数",
     "現在価格",
-    "値段",
     "期待到達価格",
     "見込み上昇値",
     "下落リスク",
@@ -183,6 +182,12 @@
     if (!grid) return;
     const items = Array.from(grid.querySelectorAll(".detail-item"));
     if (!items.length) return;
+
+    for (const item of items) {
+      const label = item.querySelector("span");
+      if (label?.textContent?.trim() === "値段") label.textContent = "現在価格";
+    }
+
     const byLabel = new Map(items.map((item) => [item.querySelector("span")?.textContent?.trim(), item]));
     const ordered = [];
     for (const label of DESIRED_DETAIL_ORDER) {
@@ -192,9 +197,12 @@
     for (const item of items) {
       if (!ordered.includes(item)) ordered.push(item);
     }
-    if (ordered.length === items.length) ordered.forEach((item) => grid.appendChild(item));
-    const priceItem = byLabel.get("値段");
-    if (priceItem) priceItem.querySelector("span").textContent = "現在価格";
+
+    const currentSignature = items.map((item) => item.querySelector("span")?.textContent?.trim()).join("|");
+    const nextSignature = ordered.map((item) => item.querySelector("span")?.textContent?.trim()).join("|");
+    if (currentSignature !== nextSignature && ordered.length === items.length) {
+      ordered.forEach((item) => grid.appendChild(item));
+    }
   }
 
   function refreshFixes() {
