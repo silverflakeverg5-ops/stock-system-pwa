@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#101820" />
     <title>Stock System Ops</title>
-    <link rel="manifest" href="manifest.webmanifest?v=16" />
-    <link rel="stylesheet" href="styles.css?v=16" />
+    <link rel="manifest" href="manifest.webmanifest?v=17" />
+    <link rel="stylesheet" href="styles.css?v=17" />
   </head>
   <body>
     <header class="app-header">
@@ -56,6 +56,7 @@
 
       <nav class="tab-bar" aria-label="表示切替">
         <button class="tab-button active" data-tab="candidates" type="button">候補</button>
+        <button class="tab-button" data-tab="paper" type="button">仮の保有</button>
         <button class="tab-button" data-tab="holdings" type="button">保有銘柄</button>
         <button class="tab-button" data-tab="watchlist" type="button">監視銘柄</button>
       </nav>
@@ -81,11 +82,30 @@
             </div>
             <select id="actionFilter" aria-label="候補種別">
               <option value="BUY_CANDIDATE">買い候補</option>
-              <option value="WATCH">監視</option>
+              <option value="WATCH">枠の外</option>
+              <option value="SKIP">除外</option>
               <option value="ALL">すべて</option>
             </select>
           </div>
           <div id="candidateList" class="candidate-list"></div>
+        </section>
+      </section>
+
+      <section id="paperView" class="tab-view">
+        <section class="panel portfolio-panel">
+          <div class="section-head">
+            <div>
+              <h2>仮の保有（システムの成績）</h2>
+              <p>システムが10万円で、ルールどおりに売り買いしたことにした記録です。毎日夕方に更新します。</p>
+            </div>
+          </div>
+          <div class="summary-grid compact">
+            <article class="metric-card"><span>仮の資産</span><strong id="paperEquity">-</strong></article>
+            <article class="metric-card"><span>現金</span><strong id="paperCash">-</strong></article>
+            <article class="metric-card"><span>確定損益</span><strong id="paperRealized">-</strong></article>
+            <article class="metric-card"><span>勝ち負け</span><strong id="paperWins">-</strong></article>
+          </div>
+          <div id="paperList" class="candidate-list"></div>
         </section>
       </section>
 
@@ -124,7 +144,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=16" type="module"></script>
-    <script src="pwa-fixes.js?v=5" defer></script>
+    <script src="app.js?v=17" type="module"></script>
   </body>
 </html>
