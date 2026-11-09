@@ -1,14 +1,14 @@
 const STORAGE_KEY = "stock-system-pwa-config";
 const CLIENT_ID_KEY = "stock-system-client-id";
 const CASH_KEY = "stock-system-initial-cash";
-const APP_VERSION = "15";
+const APP_VERSION = "17";
 const PUBLIC_CONFIG_PATH = `public-config.json?v=${APP_VERSION}`;
 const PAGE_SIZE = 1000;
 const MAX_CANDIDATE_ROWS = 10000;
 
 const ACTION_LABELS = {
   BUY_CANDIDATE: "買い候補",
-  WATCH: "監視",
+  WATCH: "枠の外",
   WAIT: "待機",
   SKIP: "見送り",
   ALL: "すべて",
@@ -22,6 +22,17 @@ const MANUAL_ACTION_LABELS = {
   WATCH_ADDED: "監視中",
   WATCH_REMOVED: "監視解除",
 };
+
+const SETUP_LABELS = {
+  S1_TAXLOSS_X_RSI2: ["S1", "節税売り明け×RSI2"],
+  S2_DEC_TAX_LOSS: ["S2", "節税売り明け"],
+  S3_JAN_LOSER: ["S3", "1月の前年負け組"],
+  S4_DEEP_DROP_EXTREME: ["S4", "極端な地合いの急落反発"],
+  S5_IPO_FIRST_PULLBACK: ["S5", "IPO後の初押し目"],
+  X1_RSI2_VERY_WEAK_LE300: ["X1", "非常に弱い日の売られすぎ（300円以下）"],
+};
+
+const PAPER_STATUS_LABELS = { PENDING: "明日の寄りで買う", OPEN: "保有中", CLOSED: "売った", CANCELLED: "取りやめ" };
 
 const MARKET_LABELS = {
   MARKET_VERY_STRONG: "かなり強い",
@@ -84,6 +95,7 @@ const state = {
   candidates: [],
   market: [],
   manualActions: [],
+  paper: [],
   selectedCode: null,
   actionFilter: "BUY_CANDIDATE",
   activeTab: "candidates",
@@ -118,6 +130,11 @@ const els = {
   realizedPnl: document.querySelector("#realizedPnl"),
   holdingsList: document.querySelector("#holdingsList"),
   watchlistList: document.querySelector("#watchlistList"),
+  paperList: document.querySelector("#paperList"),
+  paperEquity: document.querySelector("#paperEquity"),
+  paperCash: document.querySelector("#paperCash"),
+  paperRealized: document.querySelector("#paperRealized"),
+  paperWins: document.querySelector("#paperWins"),
 };
 
 async function clearOldServiceWorker() {
@@ -273,6 +290,29 @@ function actionClass(action) {
   return "skip";
 }
 
+const isNewLogic = (row) => Boolean(row && SETUP_LABELS[row.signal_name]);
+const setupShort = (setup) => (SETUP_LABELS[setup] || [setup || "-"])[0];
+const setupName = (setup) => (SETUP_LABELS[setup] ? `${SETUP_LABELS[setup][0]} ${SETUP_LABELS[setup][1]}` : setup || "-");
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+
+function addWeekdays(isoDate, n) {
+  // 祝日は考えない目安（正確な期限はLINEと候補の表示を使う）
+  const d = new Date(`${isoDate}T00:00:00`);
+  let k = 0;
+  while (k < n) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) k += 1;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+function exitRuleText(rule) {
+  if (!rule) return "-";
+  return `損切り -${rule.sl}%` + (rule.tp ? ` / 利確 +${rule.tp}%` : "") + ` / ${rule.hold}日目の引けで売る`;
+}
+
+const NO_CANDIDATE_TEXT = "今日の候補はありません。S1・S2は12月の最後の7営業日、S3は1月の最初の10営業日、S4・X1は地合いが極端な日だけ出ます。";
+
 function latestManualAction(code) {
   return state.manualActions
     .filter((row) => String(row.code) === String(code))
@@ -293,6 +333,23 @@ function selectCandidate(code, shouldScroll = false) {
 function setActiveTab(tab) {
   state.activeTab = tab;
   render();
+}
+
+async function getLatestRun() {
+  const runs = await fetchTable("stock_operation_runs", { select: "*", order: "created_at.desc", limit: "1" });
+  const run = runs[0] || null;
+  if (!run) return { run: null, candidates: [] };
+  const candidates = await fetchTablePaged("stock_daily_candidates", { select: "*", run_id: `eq.${run.run_id}`, order: "rank.asc" });
+  return { run, candidates };
+}
+
+async function loadPaperPositions() {
+  try {
+    return await fetchTable("stock_paper_positions", { select: "*", order: "created_at.desc", limit: "500" });
+  } catch (error) {
+    console.warn("paper positions are not available yet", error);
+    return [];
+  }
 }
 
 async function getNewestRunWithCandidates() {
@@ -336,8 +393,8 @@ async function loadData() {
   }
   showSetup(false);
   els.runStatus.textContent = `読み込み中... ${normalizeSupabaseUrl(state.config.url)}`;
-  const picked = await getNewestRunWithCandidates();
-  if (!picked.run || !picked.candidates.length) throw new Error("表示できる候補がありません。");
+  const picked = await getLatestRun();
+  if (!picked.run) throw new Error("実行結果がまだありません。");
   const market = await fetchTable("stock_daily_market_summary", {
     select: "*",
     run_id: `eq.${picked.run.run_id}`,
@@ -348,6 +405,7 @@ async function loadData() {
   state.candidates = picked.candidates;
   state.market = market;
   state.manualActions = await loadManualActions();
+  state.paper = await loadPaperPositions();
   state.selectedCode = state.candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || state.candidates[0]?.code || null;
   render();
 }
@@ -441,10 +499,11 @@ function filteredCandidates() {
 function renderCandidates() {
   const rows = filteredCandidates();
   if (!rows.length) {
-    els.candidateList.innerHTML = `<div class="empty-state">該当候補はありません。</div>`;
+    els.candidateList.innerHTML = `<div class="empty-state">${state.candidates.length ? "この区分の候補はありません。" : NO_CANDIDATE_TEXT}</div>`;
     return;
   }
   els.candidateList.innerHTML = rows.map((row) => {
+    if (isNewLogic(row)) return newCandidateCard(row);
     const score = row.switch_priority_score;
     const ep = expectedPrice(row);
     const gain = ep == null ? null : ep - Number(row.close_price);
@@ -473,6 +532,36 @@ function renderCandidates() {
   els.candidateList.querySelectorAll(".candidate-card").forEach((button) => {
     button.addEventListener("click", () => selectCandidate(button.dataset.code, true));
   });
+}
+
+function newCandidateCard(row) {
+  const p = row.payload || {};
+  const h = p.hist || {};
+  const active = row.code === state.selectedCode ? " active" : "";
+  const manual = latestManualAction(row.code);
+  const manualBadge = manual ? `<span class="manual-badge">${manualActionLabel(manual.action_type)}</span>` : "";
+  const note = row.suggested_action === "SKIP" ? `<div class="card-note">${esc(row.reason)}</div>` : p.gc_note_text ? `<div class="card-note">${esc(p.gc_note_text)}</div>` : "";
+  return `
+    <button class="candidate-card${active}" data-code="${esc(row.code)}" type="button">
+      <div>
+        <div class="card-title">
+          <span class="code">${esc(row.code)}</span>
+          <span class="name">${esc(row.name)}</span>
+          <span class="badge ${actionClass(row.suggested_action)}">${actionLabel(row.suggested_action)}</span>
+          <span class="setup-chip">${setupShort(row.signal_name)}</span>
+          ${manualBadge}
+        </div>
+        <div class="card-numbers">
+          <span>終値 ${yen(row.close_price)}</span>
+          <span>損切り ${yen(p.stop_price_est)}</span>
+          ${p.take_profit_price_est ? `<span>利確 ${yen(p.take_profit_price_est)}</span>` : ""}
+          <span>期限 ${esc(p.exit_due_date_est || "-")}</span>
+          <span>過去平均 ${pctSigned(h.avg)}（勝ち${h.win ?? "-"}%）</span>
+        </div>
+        ${note}
+      </div>
+      <div class="rank-no">${row.rank ?? ""}</div>
+    </button>`;
 }
 
 async function loadChartForSelected() {
@@ -534,6 +623,10 @@ function renderDetail() {
     drawChart([]);
     return;
   }
+  if (isNewLogic(row)) {
+    renderNewDetail(row);
+    return;
+  }
   const ep = expectedPrice(row);
   const gain = ep == null ? null : ep - Number(row.close_price);
   const manual = latestManualAction(row.code);
@@ -558,7 +651,7 @@ function renderDetail() {
       <strong>運用記録</strong>
       <p id="manualActionStatus">${manualText}</p>
       <div class="manual-grid">
-        <label>約定/判断価格<input id="manualPriceInput" type="number" inputmode="decimal" value="${Number(row.close_price) || ""}" /></label>
+        <label>約定/判断価格<input id="manualPriceInput" type="number" inputmode="decimal" value="${Number(row.close_price) ? Math.round(Number(row.close_price) * 10) / 10 : ""}" /></label>
         <label>株数<input id="manualQuantityInput" type="number" inputmode="numeric" placeholder="任意" /></label>
       </div>
       <textarea id="manualMemoInput" rows="2" placeholder="任意メモ。例: 寄りで買い、板薄いので見送り等"></textarea>
@@ -578,6 +671,122 @@ function renderDetail() {
     button.addEventListener("click", () => saveManualAction(row, button.dataset.manualAction));
   });
   loadChartForSelected().then(drawChart).catch((error) => { els.chartMeta.textContent = error.message; });
+}
+
+function manualPanelHtml(row) {
+  const manual = latestManualAction(row.code);
+  const manualText = manual ? `${manualActionLabel(manual.action_type)} / ${manual.created_at ? new Date(manual.created_at).toLocaleString("ja-JP") : "時刻不明"}` : "未記録";
+  return `
+    <div class="manual-panel">
+      <strong>運用記録</strong>
+      <p id="manualActionStatus">${manualText}</p>
+      <div class="manual-grid">
+        <label>約定/判断価格<input id="manualPriceInput" type="number" inputmode="decimal" value="${Number(row.close_price) ? Math.round(Number(row.close_price) * 10) / 10 : ""}" /></label>
+        <label>株数<input id="manualQuantityInput" type="number" inputmode="numeric" placeholder="任意" /></label>
+      </div>
+      <textarea id="manualMemoInput" rows="2" placeholder="任意メモ。例: 寄りで買い、板薄いので見送り等"></textarea>
+      <div class="manual-actions">
+        <button class="primary-button" data-manual-action="BUY_EXECUTED" type="button">買った</button>
+        <button class="ghost-button" data-manual-action="SKIP_DECIDED" type="button">見送った</button>
+        <button class="ghost-button" data-manual-action="SELL_EXECUTED" type="button">決済した</button>
+        <button class="ghost-button" data-manual-action="WATCH_ADDED" type="button">監視追加</button>
+        <button class="ghost-button" data-manual-action="WATCH_REMOVED" type="button">監視解除</button>
+        <button class="ghost-button" data-manual-action="MEMO" type="button">メモ保存</button>
+      </div>
+    </div>`;
+}
+
+function renderNewDetail(row) {
+  const p = row.payload || {};
+  const h = p.hist || {};
+  const paper = state.paper.find((x) => String(x.code) === String(row.code) && ["PENDING", "OPEN"].includes(x.status));
+  const item = (label, value) => `<div class="detail-item"><span>${label}</span><strong>${value}</strong></div>`;
+  els.candidateDetail.innerHTML = `
+    <div class="card-title">
+      <span class="code">${esc(row.code)}</span>
+      <span class="name">${esc(row.name)}</span>
+      <span class="badge ${actionClass(row.suggested_action)}">${actionLabel(row.suggested_action)}</span>
+    </div>
+    <div class="detail-grid">
+      ${item("場面", esc(setupName(row.signal_name)))}
+      ${item("判断日", esc(p.signal_date || row.run_date || "-"))}
+      ${item("終値", `${yen(row.close_price)}円`)}
+      ${item("買う日", `${esc(p.buy_date_est || "-")} の寄り`)}
+      ${item("損切り（目安）", `${yen(p.stop_price_est)}円`)}
+      ${item("利確（目安）", p.take_profit_price_est ? `${yen(p.take_profit_price_est)}円` : "なし")}
+      ${item("期限", `${esc(p.exit_due_date_est || "-")} の引け`)}
+      ${item("地合い", esc(marketLabel(row.market_regime_5)))}
+      ${item("過去の平均", pctSigned(h.avg))}
+      ${item("過去の中央値", pctSigned(h.median))}
+      ${item("勝ち / 損切り", `${h.win ?? "-"}% / ${h.stop ?? "-"}%`)}
+      ${item("過去の件数", `${h.n ?? "-"}件`)}
+      ${item("順位", `${row.rank ?? "-"}位（並べ方 ${number(row.switch_priority_score, 0)}）`)}
+      ${item("仮の保有", paper ? `${PAPER_STATUS_LABELS[paper.status]}${paper.shares ? ` ${paper.shares}株` : ""}` : "なし")}
+    </div>
+    <div class="signal-box"><strong>売り方</strong><br>${exitRuleText(p.exit_rule)}。損切り・利確の値段は終値からの目安で、実際は買った値段から計算します。</div>
+    <div class="signal-box"><strong>理由・注意</strong><br>${esc(row.reason || "-")}</div>
+    <div class="signal-box"><strong>点いた場面</strong><br>${esc(String(row.signal_chain || row.signal_name).split(" -> ").map(setupName).join(" / "))}</div>
+    ${manualPanelHtml(row)}
+  `;
+  els.candidateDetail.querySelectorAll("[data-manual-action]").forEach((button) => {
+    button.addEventListener("click", () => saveManualAction(row, button.dataset.manualAction));
+  });
+  loadChartForSelected().then(drawChart).catch((error) => { els.chartMeta.textContent = error.message; });
+}
+
+function paperAccount() {
+  const start = Number(state.run?.report?.paper?.start_cash) || 100000;
+  const closed = state.paper.filter((p) => p.status === "CLOSED");
+  const open = state.paper.filter((p) => p.status === "OPEN");
+  const realized = closed.reduce((sum, p) => sum + (Number(p.pnl_yen) || 0), 0);
+  const openCost = open.reduce((sum, p) => sum + (Number(p.cost_yen) || 0), 0);
+  const openValue = open.reduce((sum, p) => sum + ((Number(p.shares) || 0) * (Number(p.last_close) || 0) || Number(p.cost_yen) || 0), 0);
+  const cash = start + realized - openCost;
+  const wins = closed.filter((p) => Number(p.pnl_yen) > 0).length;
+  return { start, realized, cash, equity: cash + openValue, wins, losses: closed.length - wins };
+}
+
+function renderPaper() {
+  if (!els.paperList) return;
+  const a = paperAccount();
+  els.paperEquity.textContent = yen(a.equity);
+  els.paperCash.textContent = yen(a.cash);
+  els.paperRealized.textContent = yenSigned(a.realized);
+  els.paperWins.textContent = `${a.wins}勝 ${a.losses}敗`;
+  const groups = [
+    ["明日の寄りで買う", state.paper.filter((p) => p.status === "PENDING")],
+    ["保有中", state.paper.filter((p) => p.status === "OPEN")],
+    ["売った（新しい順）", state.paper.filter((p) => p.status === "CLOSED").sort((x, y) => String(y.exit_date).localeCompare(String(x.exit_date))).slice(0, 30)],
+  ];
+  const card = (p) => {
+    let nums = "";
+    if (p.status === "PENDING") nums = `<span>前日終値 ${yen(p.signal_close)}</span><span>予定 ${p.planned_shares}株</span><span>${esc(p.planned_buy_date || "")} の寄り</span>`;
+    if (p.status === "OPEN") nums = `<span>買値 ${yen(p.buy_price)} × ${p.shares}株</span><span>今 ${pctSigned(p.unrealized_pct)}</span><span>損切り ${yen(p.stop_price)}</span>${p.take_profit_price ? `<span>利確 ${yen(p.take_profit_price)}</span>` : ""}<span>期限 ${esc(p.exit_due_date)}</span>`;
+    if (p.status === "CLOSED") nums = `<span>${esc(p.buy_date)} ${yen(p.buy_price)} → ${esc(p.exit_date)} ${yen(p.exit_price)}</span><span>${esc(p.exit_reason)}</span><span>${pctSigned(p.pnl_pct)}（${yenSigned(p.pnl_yen)}）</span>`;
+    return `
+      <button class="candidate-card" data-code="${esc(p.code)}" type="button">
+        <div>
+          <div class="card-title"><span class="code">${esc(p.code)}</span><span class="name">${esc(p.name)}</span><span class="setup-chip">${setupShort(p.setup)}</span></div>
+          <div class="card-numbers">${nums}</div>
+        </div>
+      </button>`;
+  };
+  els.paperList.innerHTML = groups.map(([title, list]) => `<h3 class="group-title">${title}（${list.length}）</h3>` + (list.length ? list.map(card).join("") : `<div class="empty-state">なし</div>`)).join("");
+  els.paperList.querySelectorAll(".candidate-card").forEach((button) => button.addEventListener("click", () => {
+    if (latestCandidate(button.dataset.code)) selectCandidate(button.dataset.code, true);
+  }));
+}
+
+function holdingExitGuide(pos) {
+  const buy = [...state.manualActions].filter((a) => String(a.code) === String(pos.code) && a.action_type === "BUY_EXECUTED")
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0];
+  const rule = buy?.candidate_payload?.payload?.exit_rule;
+  if (!rule || !pos.avgPrice) return "";
+  const stop = pos.avgPrice * (1 - rule.sl / 100);
+  const tp = rule.tp ? pos.avgPrice * (1 + rule.tp / 100) : null;
+  const day = String(buy.created_at || "").slice(0, 10);
+  const due = day ? addWeekdays(day, rule.hold - 1) : "-";
+  return `<span>売りの目安: 損切り ${yen(stop)}${tp ? ` / 利確 ${yen(tp)}` : ""} / 期限 ${due}ごろ</span>`;
 }
 
 function renderPortfolio() {
@@ -601,6 +810,7 @@ function renderPortfolio() {
           <span>現在 ${yen(pos.currentPrice)}</span>
           <span>評価 ${pos.marketValue ? yen(pos.marketValue) : "-"}</span>
           <span>損益 ${pos.unrealized == null ? "-" : yenSigned(pos.unrealized)} ${pos.unrealizedPct == null ? "" : `(${pctSigned(pos.unrealizedPct)})`}</span>
+          ${holdingExitGuide(pos)}
         </div>
       </div>
     </button>
@@ -670,6 +880,7 @@ function render() {
   renderDetail();
   renderPortfolio();
   renderWatchlist();
+  renderPaper();
 }
 
 els.saveConfigButton.addEventListener("click", () => {
