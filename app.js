@@ -406,7 +406,13 @@ async function loadData() {
   state.market = market;
   state.manualActions = await loadManualActions();
   state.paper = await loadPaperPositions();
-  state.selectedCode = state.candidates.find((r) => r.suggested_action === "BUY_CANDIDATE")?.code || state.candidates[0]?.code || null;
+  // 仮の保有の枠が埋まっていて買い候補が無い日も、候補を出す（枠の外の候補を表示する）
+  const hasBuy = state.candidates.some((r) => r.suggested_action === "BUY_CANDIDATE");
+  if (!hasBuy && state.actionFilter === "BUY_CANDIDATE" && state.candidates.some((r) => r.suggested_action === "WATCH")) {
+    state.actionFilter = "WATCH";
+    els.actionFilter.value = "WATCH";
+  }
+  state.selectedCode = state.candidates.find((r) => r.suggested_action === state.actionFilter)?.code || state.candidates[0]?.code || null;
   render();
 }
 

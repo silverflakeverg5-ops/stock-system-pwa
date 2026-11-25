@@ -1,4 +1,4 @@
-const CACHE_NAME = "stock-system-ops-v1";
+const CACHE_NAME = "stock-system-ops-v2";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
